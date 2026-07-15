@@ -1,0 +1,69 @@
+name: Daily Microsoft Jobs LinkedIn Post
+
+on:
+  schedule:
+    # 11:00 UTC = 7:00 AM ET (summer). Use '0 12 * * *' in winter, or just leave it.
+    - cron: '0 11 * * *'
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  generate-and-deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate LinkedIn post
+        id: gen
+        env:
+          FILTER_COUNTRY: 'United States'   # '' for all, 'India' for India edition
+          MAX_JOBS_TOTAL: '30'              # jobs covered per day
+          JOBS_PER_POST: '10'               # split into 3 LinkedIn-sized posts
+          LOOKBACK_HOURS: '24'
+          # FILTER_TITLE_KEYWORDS: 'software engineer,senior'   # uncomment to filter
+        run: |
+          python ms_jobs_pipeline.py
+          if [ -f post.txt ]; then
+            echo "has_post=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_post=false" >> "$GITHUB_OUTPUT"
+            echo "No new jobs today - skipping delivery."
+          fi
+
+      - name: Create GitHub Issue with the post
+        if: steps.gen.outputs.has_post == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "📋 LinkedIn post — $(date +'%B %d, %Y')" \
+            --body-file post.txt
+
+      - name: Email the post (Gmail SMTP)
+        if: steps.gen.outputs.has_post == 'true'
+        continue-on-error: true   # issue still gets created if email secrets are missing
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "🚀 Your Microsoft jobs LinkedIn post — ready to copy"
+          to: ${{ secrets.MAIL_TO }}
+          from: MS Jobs Bot <${{ secrets.GMAIL_USERNAME }}>
+          body: file://post.txt
+
+      - name: Upload post as artifact (backup)
+        if: steps.gen.outputs.has_post == 'tr
