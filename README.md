@@ -40,7 +40,7 @@ Actions tab → **Daily Microsoft Jobs LinkedIn Post** → **Run workflow**. Wit
 Edit the `env:` block in `.github/workflows/daily-post.yml`:
 
 - `FILTER_COUNTRY` — `United States`, `India`, or `''` for all
-- `MAX_JOBS_TOTAL` — jobs covered per day (default 30), `JOBS_PER_POST` — jobs per LinkedIn post (default 10, so 3 posts/day)
+- `MAX_JOBS_TOTAL` — jobs covered per day (default 50), `JOBS_PER_POST` — jobs per LinkedIn post (default 1 = one complete post per job)
 - `LOOKBACK_HOURS` — posting window (default 24)
 - `FILTER_TITLE_KEYWORDS` — e.g. `software engineer,senior` to only include matching titles
 
@@ -51,3 +51,11 @@ Schedule is the `cron` line (`0 11 * * *` = 11:00 UTC = 7 AM EDT). Salary (💰)
 - Uses the same unauthenticated public API as jobs.careers.microsoft.com — no key needed.
 - If a run finds no new jobs, no issue/email is sent that day.
 - Each run also uploads `post.txt` as a workflow artifact (backup copy).
+
+## Azure deployment (currently live)
+
+The production automation runs in Azure (resource group `automated-email`):
+
+- `func-linkedin-jobs-26418` — two timers: **7 AM ET** first 50 jobs (software engineers first), **10 AM PT** overflow batch if more than 50
+- Posts saved to blob container `linkedin-posts`, emailed via Gmail SMTP
+- Code for the function is in `azure/` + `ms_jobs_pipeline.py`
