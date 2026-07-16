@@ -127,7 +127,8 @@ def fetch_detail(position_id):
 
 def build_post(jobs, date_str, part=None, total_parts=None):
     header = f"\U0001F680 Microsoft is Hiring! | {date_str}"
-    if total_parts and total_parts > 1:
+    # Part numbering only for multi-job posts; single-job posts stay clean
+    if total_parts and total_parts > 1 and len(jobs) > 1:
         header += f" (Part {part}/{total_parts})"
     lines = [header, "", "Fresh roles posted in the last 24 hours \U0001F447", ""]
 
