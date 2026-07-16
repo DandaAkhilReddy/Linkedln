@@ -26,7 +26,7 @@ DETAIL_URL = BASE + "/api/pcsx/position_details"
 DOMAIN = "microsoft.com"
 
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS", "24"))
-MAX_JOBS_TOTAL = int(os.getenv("MAX_JOBS_TOTAL", "30"))     # jobs covered per day
+MAX_JOBS_TOTAL = int(os.getenv("MAX_JOBS_TOTAL", "50"))     # jobs per email batch
 JOBS_PER_POST = int(os.getenv("JOBS_PER_POST", "10"))       # LinkedIn ~3000 char limit
 PAGE_SIZE = 10                                              # API returns 10 per page
 MAX_PAGES = 25
@@ -156,23 +156,44 @@ def build_post(jobs, date_str, part=None, total_parts=None):
     return "\n".join(lines)
 
 
-def run():
-    date_str = datetime.now().strftime("%B %d, %Y")
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
-    jobs = filter_title_keywords(fetch_recent_jobs(cutoff))[:MAX_JOBS_TOTAL]
-    if not jobs:
-        log.info("No new jobs in window — nothing to post today.")
-        return None
+def sort_software_first(jobs):
+    """Software engineer roles first, then other engineering, then the rest.
+    Stable sort keeps newest-first order within each group."""
+    def key(j):
+        t = j.get("name", "").lower()
+        if "software engineer" in t or "software development" in t:
+            return 0
+        if "engineer" in t or "developer" in t or "scientist" in t:
+            return 1
+        return 2
+    return sorted(jobs, key=key)
 
+
+def get_jobs():
+    """All fresh jobs in the lookback window, software engineers first."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
+    return sort_software_first(filter_title_keywords(fetch_recent_jobs(cutoff)))
+
+
+def render_posts(jobs, date_str=None):
+    """Render a list of jobs into divider-separated LinkedIn posts."""
+    date_str = date_str or datetime.now().strftime("%B %d, %Y")
     chunks = [jobs[i:i + JOBS_PER_POST] for i in range(0, len(jobs), JOBS_PER_POST)]
     total = len(chunks)
     posts = [build_post(c, date_str, part=i + 1, total_parts=total) for i, c in enumerate(chunks)]
-
     divider = "\n\n" + "=" * 12 + "  ✂️ COPY NEXT POST SEPARATELY  " + "=" * 12 + "\n\n"
-    output = divider.join(posts)
+    return divider.join(posts)
+
+
+def run():
+    jobs = get_jobs()[:MAX_JOBS_TOTAL]
+    if not jobs:
+        log.info("No new jobs in window — nothing to post today.")
+        return None
+    output = render_posts(jobs)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(output)
-    log.info("%d jobs → %d post(s) written to %s", len(jobs), total, OUTPUT_FILE)
+    log.info("%d jobs written to %s", len(jobs), OUTPUT_FILE)
     print("\n" + output)
     return output
 
