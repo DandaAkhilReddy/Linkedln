@@ -169,9 +169,10 @@ def sort_software_first(jobs):
     return sorted(jobs, key=key)
 
 
-def get_jobs():
-    """All fresh jobs in the lookback window, software engineers first."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
+def get_jobs(cutoff=None):
+    """All fresh jobs since `cutoff` (default: LOOKBACK_HOURS ago), software engineers first."""
+    if cutoff is None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
     return sort_software_first(filter_title_keywords(fetch_recent_jobs(cutoff)))
 
 

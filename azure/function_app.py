@@ -1,9 +1,12 @@
 """
-Azure Functions (Python v2 model).
-- morning_batch:   7:00 AM ET  -> first 50 new jobs (software engineers first)
-- afternoon_batch: 10:00 AM PT -> next 50, only if more than 50 were found
-- run_now: HTTP trigger (function key) to run batch 1 on demand / debug
-Saves post(s) to Blob Storage and emails via Gmail SMTP.
+Azure Functions (Python v2 model) — 3 sends per day (ET):
+- batch_7am:  7:00 AM ET
+- batch_2pm:  2:00 PM ET
+- batch_7pm:  7:00 PM ET
+Each run emails only jobs posted since the previous run (no duplicates),
+up to BATCH_SIZE per email; extras are parked and drained next run.
+State (last run time, parked jobs, sent ids) lives in blob storage.
+- run_now: HTTP trigger (function key) to run a batch on demand / debug
 """
 
 import os
@@ -13,6 +16,7 @@ import logging
 import datetime
 import smtplib
 import traceback
+from datetime import timezone, timedelta
 from email.mime.text import MIMEText
 
 import azure.functions as func
@@ -23,6 +27,7 @@ import ms_jobs_pipeline as pipeline
 app = func.FunctionApp()
 
 BATCH_SIZE = int(os.getenv("MAX_JOBS_TOTAL", "50"))
+STATE_BLOB = "state.json"
 
 
 def _container():
@@ -35,14 +40,26 @@ def _container():
     return c
 
 
-def _send_email(post, batch_label):
+def _load_state(c):
+    try:
+        return json.loads(c.download_blob(STATE_BLOB).readall())
+    except Exception:
+        return {"last_run": None, "parked": [], "sent_ids": []}
+
+
+def _save_state(c, state):
+    state["sent_ids"] = state.get("sent_ids", [])[-500:]
+    c.upload_blob(STATE_BLOB, json.dumps(state), overwrite=True)
+
+
+def _send_email(post, label):
     user = os.environ.get("GMAIL_USERNAME")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
     to = os.environ.get("MAIL_TO")
     if not (user and pwd and to):
         return "email not configured"
     msg = MIMEText(post, "plain", "utf-8")
-    msg["Subject"] = f"🚀 Microsoft jobs LinkedIn posts {batch_label} — {datetime.date.today():%B %d, %Y}"
+    msg["Subject"] = f"🚀 Microsoft jobs LinkedIn posts {label} — {datetime.date.today():%B %d, %Y}"
     msg["From"] = f"MS Jobs Bot <{user}>"
     msg["To"] = to
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
@@ -51,77 +68,85 @@ def _send_email(post, batch_label):
     return f"emailed to {to}"
 
 
-def _deliver(jobs, batch_label, blob_suffix):
-    """Render jobs -> blob + email. Returns notes."""
-    notes = []
-    post = pipeline.render_posts(jobs)
+def batch_run(label, blob_suffix):
+    """Fetch jobs since last run, drain parked ones first, send up to BATCH_SIZE."""
     c = _container()
+    state = _load_state(c)
+    now = datetime.datetime.now(timezone.utc)
+
+    # Cutoff = last run time (capped at 24h back); first ever run = 24h
+    if state.get("last_run"):
+        cutoff = max(datetime.datetime.fromisoformat(state["last_run"]),
+                     now - timedelta(hours=24))
+    else:
+        cutoff = now - timedelta(hours=24)
+
+    fresh = pipeline.get_jobs(cutoff)
+    sent_ids = set(state.get("sent_ids", []))
+    parked = state.get("parked", [])
+    seen = {j.get("id") for j in parked}
+
+    queue = parked + [j for j in fresh
+                      if j.get("id") not in sent_ids and j.get("id") not in seen]
+    queue = pipeline.sort_software_first(queue)
+
+    if not queue:
+        state["last_run"] = now.isoformat()
+        _save_state(c, state)
+        return [f"no new jobs since {cutoff:%H:%M UTC}"]
+
+    batch, rest = queue[:BATCH_SIZE], queue[BATCH_SIZE:]
+    post = pipeline.render_posts(batch)
+
+    notes = []
     blob_name = f"post_{datetime.date.today().isoformat()}_{blob_suffix}.txt"
     c.upload_blob(blob_name, post, overwrite=True)
-    notes.append(f"blob saved: {blob_name} ({len(jobs)} jobs)")
+    notes.append(f"blob saved: {blob_name} ({len(batch)} jobs)")
     try:
-        notes.append(_send_email(post, batch_label))
+        notes.append(_send_email(post, f"({label} — {len(batch)} jobs)"))
     except Exception as e:
         notes.append(f"email failed: {e}")
-    return notes
 
-
-def morning():
-    """Fetch everything new, send first BATCH_SIZE, park the rest for 10 AM PT."""
-    jobs = pipeline.get_jobs()
-    if not jobs:
-        return ["no new jobs in window"]
-    first, rest = jobs[:BATCH_SIZE], jobs[BATCH_SIZE:]
-    notes = _deliver(first, f"(batch 1 — {len(first)} jobs)", "batch1")
-    c = _container()
-    overflow_blob = f"overflow_{datetime.date.today().isoformat()}.json"
+    state["last_run"] = now.isoformat()
+    state["parked"] = rest
+    state["sent_ids"] = list(sent_ids) + [j.get("id") for j in batch]
+    _save_state(c, state)
     if rest:
-        c.upload_blob(overflow_blob, json.dumps(rest), overwrite=True)
-        notes.append(f"{len(rest)} jobs parked for the 10 AM PT batch")
-    return notes
-
-
-def afternoon():
-    """Send the parked overflow jobs (up to BATCH_SIZE), if any."""
-    c = _container()
-    overflow_blob = f"overflow_{datetime.date.today().isoformat()}.json"
-    try:
-        rest = json.loads(c.download_blob(overflow_blob).readall())
-    except Exception:
-        return ["no overflow batch today"]
-    if not rest:
-        return ["no overflow batch today"]
-    batch, remaining = rest[:BATCH_SIZE], rest[BATCH_SIZE:]
-    notes = _deliver(batch, f"(batch 2 — {len(batch)} jobs)", "batch2")
-    c.upload_blob(overflow_blob, json.dumps(remaining), overwrite=True)
-    if remaining:
-        notes.append(f"{len(remaining)} jobs still unposted (beyond 100/day)")
+        notes.append(f"{len(rest)} jobs parked for the next send")
     return notes
 
 
 # 11:00 UTC = 7:00 AM ET (summer)
 @app.timer_trigger(schedule="0 0 11 * * *", arg_name="timer", run_on_startup=False)
-def morning_batch(timer: func.TimerRequest) -> None:
+def batch_7am(timer: func.TimerRequest) -> None:
     try:
-        logging.info("Morning batch: %s", "; ".join(morning()))
+        logging.info("7 AM batch: %s", "; ".join(batch_run("7 AM batch", "0700")))
     except Exception:
-        logging.error("Morning batch crashed:\n%s", traceback.format_exc())
+        logging.error("7 AM batch crashed:\n%s", traceback.format_exc())
 
 
-# 17:00 UTC = 10:00 AM PT (summer)
-@app.timer_trigger(schedule="0 0 17 * * *", arg_name="timer", run_on_startup=False)
-def afternoon_batch(timer: func.TimerRequest) -> None:
+# 18:00 UTC = 2:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
+def batch_2pm(timer: func.TimerRequest) -> None:
     try:
-        logging.info("Afternoon batch: %s", "; ".join(afternoon()))
+        logging.info("2 PM batch: %s", "; ".join(batch_run("2 PM batch", "1400")))
     except Exception:
-        logging.error("Afternoon batch crashed:\n%s", traceback.format_exc())
+        logging.error("2 PM batch crashed:\n%s", traceback.format_exc())
+
+
+# 23:00 UTC = 7:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 23 * * *", arg_name="timer", run_on_startup=False)
+def batch_7pm(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("7 PM batch: %s", "; ".join(batch_run("7 PM batch", "1900")))
+    except Exception:
+        logging.error("7 PM batch crashed:\n%s", traceback.format_exc())
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
 def run_now(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        which = req.params.get("batch", "1")
-        notes = afternoon() if which == "2" else morning()
+        notes = batch_run("manual batch", "manual")
         return func.HttpResponse("NOTES: " + "; ".join(notes), status_code=200,
                                  mimetype="text/plain; charset=utf-8")
     except Exception:
