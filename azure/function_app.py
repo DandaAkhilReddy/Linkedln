@@ -68,14 +68,16 @@ def _send_email(post, label):
     return f"emailed to {to}"
 
 
-def batch_run(label, blob_suffix):
-    """Fetch jobs since last run, drain parked ones first, send up to BATCH_SIZE."""
+def batch_run(label, blob_suffix, lookback_hours=None):
+    """Fetch jobs since last run, drain parked ones first, send up to BATCH_SIZE.
+    lookback_hours overrides the window (catch-up runs); normally cutoff = last run."""
     c = _container()
     state = _load_state(c)
     now = datetime.datetime.now(timezone.utc)
 
-    # Cutoff = last run time (capped at 24h back); first ever run = 24h
-    if state.get("last_run"):
+    if lookback_hours:
+        cutoff = now - timedelta(hours=lookback_hours)
+    elif state.get("last_run"):
         cutoff = max(datetime.datetime.fromisoformat(state["last_run"]),
                      now - timedelta(hours=24))
     else:
@@ -125,28 +127,38 @@ def batch_7am(timer: func.TimerRequest) -> None:
         logging.error("7 AM batch crashed:\n%s", traceback.format_exc())
 
 
-# 18:00 UTC = 2:00 PM ET (summer)
-@app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
-def batch_2pm(timer: func.TimerRequest) -> None:
+# 16:00 UTC = 12:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 16 * * *", arg_name="timer", run_on_startup=False)
+def batch_12pm(timer: func.TimerRequest) -> None:
     try:
-        logging.info("2 PM batch: %s", "; ".join(batch_run("2 PM batch", "1400")))
+        logging.info("12 PM batch: %s", "; ".join(batch_run("12 PM batch", "1200")))
     except Exception:
-        logging.error("2 PM batch crashed:\n%s", traceback.format_exc())
+        logging.error("12 PM batch crashed:\n%s", traceback.format_exc())
 
 
-# 23:00 UTC = 7:00 PM ET (summer)
-@app.timer_trigger(schedule="0 0 23 * * *", arg_name="timer", run_on_startup=False)
-def batch_7pm(timer: func.TimerRequest) -> None:
+# 21:00 UTC = 5:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 21 * * *", arg_name="timer", run_on_startup=False)
+def batch_5pm(timer: func.TimerRequest) -> None:
     try:
-        logging.info("7 PM batch: %s", "; ".join(batch_run("7 PM batch", "1900")))
+        logging.info("5 PM batch: %s", "; ".join(batch_run("5 PM batch", "1700")))
     except Exception:
-        logging.error("7 PM batch crashed:\n%s", traceback.format_exc())
+        logging.error("5 PM batch crashed:\n%s", traceback.format_exc())
+
+
+# 01:00 UTC = 9:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 1 * * *", arg_name="timer", run_on_startup=False)
+def batch_9pm(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("9 PM batch: %s", "; ".join(batch_run("9 PM batch", "2100")))
+    except Exception:
+        logging.error("9 PM batch crashed:\n%s", traceback.format_exc())
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
 def run_now(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        notes = batch_run("manual batch", "manual")
+        hours = int(req.params.get("hours", "0")) or None
+        notes = batch_run("manual batch", "manual", lookback_hours=hours)
         return func.HttpResponse("NOTES: " + "; ".join(notes), status_code=200,
                                  mimetype="text/plain; charset=utf-8")
     except Exception:

@@ -147,9 +147,24 @@ def test_no_jobs_no_email(monkeypatch):
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
 
-def test_all_three_timers_exist():
+def test_all_four_timers_exist():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     assert '"0 0 11 * * *"' in src   # 7 AM ET
-    assert '"0 0 18 * * *"' in src   # 2 PM ET
-    assert '"0 0 23 * * *"' in src   # 7 PM ET
+    assert '"0 0 16 * * *"' in src   # 12 PM ET
+    assert '"0 0 21 * * *"' in src   # 5 PM ET
+    assert '"0 0 1 * * *"' in src    # 9 PM ET
+    assert src.count("timer_trigger") == 4
+
+
+def test_catchup_lookback_override(monkeypatch):
+    jobs = [{"id": 1, "name": "SDE"}]
+    fa, c = _setup_fa(monkeypatch, jobs)
+    captured = {}
+    monkeypatch.setattr(fa.pipeline, "get_jobs",
+                        lambda cutoff=None: captured.setdefault("cutoff", cutoff) and [] or list(jobs))
+    fa.batch_run("catch-up", "manual", lookback_hours=72)
+    import datetime as dt
+    from datetime import timezone
+    age_h = (dt.datetime.now(timezone.utc) - captured["cutoff"]).total_seconds() / 3600
+    assert 71.9 < age_h < 72.1
