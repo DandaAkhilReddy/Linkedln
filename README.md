@@ -27,7 +27,7 @@ git push -u origin main
 |---|---|
 | `GMAIL_USERNAME` | your Gmail address |
 | `GMAIL_APP_PASSWORD` | app password from https://myaccount.google.com/apppasswords (requires 2FA on) |
-| `MAIL_TO` | where to receive the post, e.g. areddy@hhamedicine.com |
+| `MAIL_TO` | where to receive the post, e.g. you@example.com |
 
 Skip this step if the GitHub Issue notification is enough — the workflow still works (email step is `continue-on-error`).
 
@@ -59,3 +59,11 @@ The production automation runs in Azure (resource group `automated-email`):
 - `func-linkedin-jobs-26418` — two timers: **7 AM ET** first 50 jobs (software engineers first), **10 AM PT** overflow batch if more than 50
 - Posts saved to blob container `linkedin-posts`, emailed via Gmail SMTP
 - Code for the function is in `azure/` + `ms_jobs_pipeline.py`
+
+## Set up your own copy (for forks/clones)
+
+1. Fork or clone this repo — there are no secrets in it; everything below is yours to configure.
+2. **GitHub Actions path (simplest):** add repo secrets `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD` (from myaccount.google.com/apppasswords, needs 2FA), and `MAIL_TO`. The workflow in `.github/workflows/daily-post.yml` then opens a daily GitHub Issue with the posts and emails them.
+3. **Azure path (what powers the original):** deploy `azure/` + `ms_jobs_pipeline.py` to a Python 3.11 Linux consumption Function App, and set app settings `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO` (plus optional `MAX_JOBS_TOTAL`, `JOBS_PER_POST`, `FILTER_COUNTRY`). Four timers send at 7 AM / 12 PM / 5 PM / 9 PM ET.
+4. Run tests with `pip install -r requirements.txt pytest azure-functions azure-storage-blob && pytest tests/`.
+5. Point it at any Eightfold-powered careers site by changing `BASE` and `DOMAIN` in `ms_jobs_pipeline.py`.

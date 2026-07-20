@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+local.settings.json
+post.txt
+.pytest_cache/
