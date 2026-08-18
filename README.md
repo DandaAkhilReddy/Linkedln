@@ -1,6 +1,6 @@
 # Big Tech Jobs → LinkedIn Post Automation
 
-Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, and **Google** 🔍 job openings — with salary, level, and links — delivered to your inbox 2x daily (7 AM & 2 PM ET).
+Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, **Google** 🔍, **Amazon** 📦, and **NVIDIA** 💚 job openings — with salary, level, and links — delivered to your inbox 2x daily (7 AM & 2 PM ET).
 
 Every day at 7 AM ET, a GitHub Action fetches Microsoft roles posted in the last 24 hours (with salary for US postings), formats a copy-paste-ready LinkedIn post, and delivers it two ways:
 

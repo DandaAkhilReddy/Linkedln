@@ -149,12 +149,13 @@ def test_no_jobs_no_email(monkeypatch):
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
 
-def test_two_timers_exist():
+def test_timers_cover_both_groups():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
-    assert '"0 0 11 * * *"' in src   # 7 AM ET
-    assert '"0 0 18 * * *"' in src   # 2 PM ET
-    assert src.count("timer_trigger") == 2
+    assert '"0 0 11 * * *"' in src and '"0 20 11 * * *"' in src    # 7 AM waves
+    assert '"0 0 18 * * *"' in src and '"0 20 18 * * *"' in src    # 2 PM waves
+    assert src.count("timer_trigger") == 4
+    assert set(fa.GROUP_A + fa.GROUP_B) == set(fa.COMPANIES)       # every company scheduled
 
 
 def test_catchup_lookback_override(monkeypatch):
@@ -250,9 +251,38 @@ def test_google_sort_software_first():
     jobs = [{"title": "Account Manager"}, {"title": "Software Engineer, Core"}]
     assert gp.sort_software_first(jobs)[0]["title"] == "Software Engineer, Core"
 
-def test_three_company_config():
+def test_five_company_config():
     import function_app as fa
-    assert set(fa.COMPANIES) == {"microsoft", "apple", "google"}
+    assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia"}
     states = {c["state"] for c in fa.COMPANIES.values()}
     prefixes = {c["prefix"] for c in fa.COMPANIES.values()}
-    assert len(states) == 3 and len(prefixes) == 3   # fully isolated
+    assert len(states) == 5 and len(prefixes) == 5   # fully isolated
+
+
+
+# ---------- Amazon / NVIDIA pipelines ----------
+
+def test_amazon_date_parse_and_sort():
+    import amazon_jobs_pipeline as az
+    import datetime as dt
+    from datetime import timezone
+    today = dt.datetime.now(timezone.utc).strftime("%B %d, %Y")
+    jobs = [{"id_icims": "1", "title": "Area Manager", "posted_date": today},
+            {"id_icims": "2", "title": "Software Development Engineer", "posted_date": today}]
+    out = az.sort_software_first(jobs)
+    assert out[0]["title"].startswith("Software")
+
+def test_nvidia_posted_on_parse():
+    import nvidia_jobs_pipeline as nv
+    import datetime as dt
+    from datetime import timezone
+    now = dt.datetime.now(timezone.utc)
+    assert nv._posted_date("Posted Today").date() == now.date()
+    assert nv._posted_date("Posted Yesterday").date() == (now - dt.timedelta(days=1)).date()
+    assert nv._posted_date("Posted 3 Days Ago").date() == (now - dt.timedelta(days=3)).date()
+    assert nv._posted_date("Posted 30+ Days Ago").date() <= (now - dt.timedelta(days=30)).date()
+
+def test_nvidia_salary_regex():
+    import nvidia_jobs_pipeline as nv
+    m = nv.PAY_RANGE_RE.search("base salary range is 184,000 USD - 287,500 USD for Level")
+    assert m and "184,000" in m.group(1)

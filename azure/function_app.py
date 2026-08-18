@@ -1,12 +1,12 @@
 """
-Azure Functions (Python v2 model) — Microsoft + Apple + Google job emails.
+Azure Functions (Python v2 model) — Microsoft + Apple + Google + Amazon + NVIDIA job emails.
 2 sends per day per company (ET): 7 AM and 2 PM.
 Each send contains only jobs posted since that company's previous send
 (no duplicates); extras are parked and drained next run. Per-company
 state lives in blob storage.
 
 HTTP triggers:
-  run_now?company=microsoft|apple|google&hours=N   manual/catch-up run
+  run_now?company=<name>&hours=N   manual/catch-up run
   test_email                                email delivery check
 """
 
@@ -26,6 +26,8 @@ from azure.storage.blob import BlobServiceClient
 import ms_jobs_pipeline
 import apple_jobs_pipeline
 import google_jobs_pipeline
+import amazon_jobs_pipeline
+import nvidia_jobs_pipeline
 
 app = func.FunctionApp()
 
@@ -38,7 +40,15 @@ COMPANIES = {
               "prefix": "apple_post", "subject": "\U0001F34F Apple jobs LinkedIn posts"},
     "google": {"pipeline": google_jobs_pipeline, "state": "google_state.json",
                "prefix": "google_post", "subject": "\U0001F50D Google jobs LinkedIn posts"},
+    "amazon": {"pipeline": amazon_jobs_pipeline, "state": "amazon_state.json",
+               "prefix": "amazon_post", "subject": "\U0001F4E6 Amazon jobs LinkedIn posts"},
+    "nvidia": {"pipeline": nvidia_jobs_pipeline, "state": "nvidia_state.json",
+               "prefix": "nvidia_post", "subject": "\U0001F49A NVIDIA jobs LinkedIn posts"},
 }
+
+# Split across invocations so each stays under the 10-minute function timeout
+GROUP_A = ["microsoft", "apple", "google"]
+GROUP_B = ["amazon", "nvidia"]
 
 
 def _container():
@@ -129,24 +139,36 @@ def batch_run(company, label, blob_suffix, lookback_hours=None):
     return notes
 
 
-def _run_both(label, suffix):
-    for company in COMPANIES:
+def _run_group(companies, label, suffix):
+    for company in companies:
         try:
             logging.info("%s %s: %s", company, label, "; ".join(batch_run(company, label, suffix)))
         except Exception:
             logging.error("%s %s crashed:\n%s", company, label, traceback.format_exc())
 
 
-# 11:00 UTC = 7:00 AM ET (summer)
+# 11:00 UTC = 7:00 AM ET (summer) — Microsoft, Apple, Google
 @app.timer_trigger(schedule="0 0 11 * * *", arg_name="timer", run_on_startup=False)
 def batch_7am(timer: func.TimerRequest) -> None:
-    _run_both("7 AM batch", "0700")
+    _run_group(GROUP_A, "7 AM batch", "0700")
 
 
-# 18:00 UTC = 2:00 PM ET (summer)
+# 11:20 UTC — Amazon, NVIDIA (staggered to fit the function timeout)
+@app.timer_trigger(schedule="0 20 11 * * *", arg_name="timer", run_on_startup=False)
+def batch_7am_b(timer: func.TimerRequest) -> None:
+    _run_group(GROUP_B, "7 AM batch", "0700")
+
+
+# 18:00 UTC = 2:00 PM ET (summer) — Microsoft, Apple, Google
 @app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
 def batch_2pm(timer: func.TimerRequest) -> None:
-    _run_both("2 PM batch", "1400")
+    _run_group(GROUP_A, "2 PM batch", "1400")
+
+
+# 18:20 UTC — Amazon, NVIDIA
+@app.timer_trigger(schedule="0 20 18 * * *", arg_name="timer", run_on_startup=False)
+def batch_2pm_b(timer: func.TimerRequest) -> None:
+    _run_group(GROUP_B, "2 PM batch", "1400")
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
