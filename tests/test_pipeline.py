@@ -221,3 +221,40 @@ def test_company_states_are_isolated(monkeypatch):
     ap_state = json.loads(c.blobs["apple_state.json"])
     assert len(ms_state["sent_ids"]) == 5 and len(ap_state["sent_ids"]) == 5
     assert set(ms_state["sent_ids"]).isdisjoint(ap_state["sent_ids"])
+
+
+
+# ---------- Google pipeline ----------
+
+def test_google_salary_regex():
+    import google_jobs_pipeline as gp
+    m = gp.PAY_RANGE_RE.search("is $163000 - $236000 (USD) + 15% bonus target")
+    assert m and "163000" in m.group(1)
+
+def test_google_page_parser():
+    import google_jobs_pipeline as gp, json as _json
+    entry = [None] * 21
+    entry[0] = 12345; entry[1] = "Software Engineer III"
+    entry[9] = [["Austin, TX, USA", None, "Austin", None, "TX", "US"]]
+    entry[10] = [None, "<p>Great job at Google doing engineering things.</p>"]
+    entry[12] = [1787042294, 0]
+    pad = ["pad" * 400] * 10   # bulk inside the blob so the size gate passes
+    blob = _json.dumps([[entry] + pad, None, 1, 1])
+    page = "AF_initDataCallback({key: 'ds:1', hash: '2', data:%s, sideChannel: {}});" % blob
+    jobs = gp._parse_jobs_page(page)
+    assert len(jobs) == 1
+    j = jobs[0]
+    assert j["title"] == "Software Engineer III" and j["posted_ts"] == 1787042294
+    assert j["locations"] == ["Austin, TX, USA"]
+
+def test_google_sort_software_first():
+    import google_jobs_pipeline as gp
+    jobs = [{"title": "Account Manager"}, {"title": "Software Engineer, Core"}]
+    assert gp.sort_software_first(jobs)[0]["title"] == "Software Engineer, Core"
+
+def test_three_company_config():
+    import function_app as fa
+    assert set(fa.COMPANIES) == {"microsoft", "apple", "google"}
+    states = {c["state"] for c in fa.COMPANIES.values()}
+    prefixes = {c["prefix"] for c in fa.COMPANIES.values()}
+    assert len(states) == 3 and len(prefixes) == 3   # fully isolated

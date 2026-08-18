@@ -1,12 +1,12 @@
 """
-Azure Functions (Python v2 model) — Microsoft + Apple job emails.
+Azure Functions (Python v2 model) — Microsoft + Apple + Google job emails.
 4 sends per day per company (ET): 7 AM, 12 PM, 5 PM, 9 PM.
 Each send contains only jobs posted since that company's previous send
 (no duplicates); extras are parked and drained next run. Per-company
 state lives in blob storage.
 
 HTTP triggers:
-  run_now?company=microsoft|apple&hours=N   manual/catch-up run
+  run_now?company=microsoft|apple|google&hours=N   manual/catch-up run
   test_email                                email delivery check
 """
 
@@ -25,6 +25,7 @@ from azure.storage.blob import BlobServiceClient
 
 import ms_jobs_pipeline
 import apple_jobs_pipeline
+import google_jobs_pipeline
 
 app = func.FunctionApp()
 
@@ -35,6 +36,8 @@ COMPANIES = {
                   "prefix": "post", "subject": "\U0001F680 Microsoft jobs LinkedIn posts"},
     "apple": {"pipeline": apple_jobs_pipeline, "state": "apple_state.json",
               "prefix": "apple_post", "subject": "\U0001F34F Apple jobs LinkedIn posts"},
+    "google": {"pipeline": google_jobs_pipeline, "state": "google_state.json",
+               "prefix": "google_post", "subject": "\U0001F50D Google jobs LinkedIn posts"},
 }
 
 
