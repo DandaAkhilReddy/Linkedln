@@ -107,20 +107,21 @@ class FakeContainer:
 def _setup_fa(monkeypatch, jobs):
     os.environ.setdefault("AzureWebJobsStorage", "fake")
     import function_app as fa
+    import ms_jobs_pipeline as msp
     c = FakeContainer()
     monkeypatch.setattr(fa, "_container", lambda: c)
-    monkeypatch.setattr(fa, "_send_email", lambda post, label: f"emailed {label}")
-    monkeypatch.setattr(fa.pipeline, "get_jobs", lambda cutoff=None: list(jobs))
-    monkeypatch.setattr(fa.pipeline, "render_posts", lambda b: f"<{len(b)} posts>")
+    monkeypatch.setattr(fa, "_send_email", lambda post, subject, label: f"emailed {label}")
+    monkeypatch.setattr(msp, "get_jobs", lambda cutoff=None: list(jobs))
+    monkeypatch.setattr(msp, "render_posts", lambda b: f"<{len(b)} posts>")
     return fa, c
 
 
 def test_no_duplicates_across_three_sends(monkeypatch):
     jobs = [{"id": i, "name": f"Software Engineer {i}"} for i in range(120)]
     fa, c = _setup_fa(monkeypatch, jobs)
-    n1 = fa.batch_run("7 AM", "0700")
-    n2 = fa.batch_run("2 PM", "1400")
-    n3 = fa.batch_run("7 PM", "1900")
+    n1 = fa.batch_run("microsoft", "7 AM", "0700")
+    n2 = fa.batch_run("microsoft", "2 PM", "1400")
+    n3 = fa.batch_run("microsoft", "7 PM", "1900")
     state = json.loads(c.blobs["state.json"])
     assert len(state["sent_ids"]) == 120
     assert len(set(state["sent_ids"])) == 120   # every job sent exactly once
@@ -131,18 +132,19 @@ def test_no_duplicates_across_three_sends(monkeypatch):
 def test_parked_jobs_drain_first(monkeypatch):
     jobs = [{"id": i, "name": f"SDE {i}"} for i in range(60)]
     fa, c = _setup_fa(monkeypatch, jobs)
-    fa.batch_run("7 AM", "0700")            # sends 50, parks 10
+    fa.batch_run("microsoft", "7 AM", "0700")            # sends 50, parks 10
     st = json.loads(c.blobs["state.json"])
     assert len(st["parked"]) == 10
-    monkeypatch.setattr(fa.pipeline, "get_jobs", lambda cutoff=None: [])  # nothing new
-    fa.batch_run("2 PM", "1400")            # drains the 10 parked
+    import ms_jobs_pipeline as msp
+    monkeypatch.setattr(msp, "get_jobs", lambda cutoff=None: [])  # nothing new
+    fa.batch_run("microsoft", "2 PM", "1400")            # drains the 10 parked
     st = json.loads(c.blobs["state.json"])
     assert st["parked"] == [] and len(st["sent_ids"]) == 60
 
 
 def test_no_jobs_no_email(monkeypatch):
     fa, c = _setup_fa(monkeypatch, [])
-    notes = fa.batch_run("7 AM", "0700")
+    notes = fa.batch_run("microsoft", "7 AM", "0700")
     assert "no new jobs" in notes[0]
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
@@ -161,10 +163,61 @@ def test_catchup_lookback_override(monkeypatch):
     jobs = [{"id": 1, "name": "SDE"}]
     fa, c = _setup_fa(monkeypatch, jobs)
     captured = {}
-    monkeypatch.setattr(fa.pipeline, "get_jobs",
+    import ms_jobs_pipeline as msp
+    monkeypatch.setattr(msp, "get_jobs",
                         lambda cutoff=None: captured.setdefault("cutoff", cutoff) and [] or list(jobs))
-    fa.batch_run("catch-up", "manual", lookback_hours=72)
+    fa.batch_run("microsoft", "catch-up", "manual", lookback_hours=72)
     import datetime as dt
     from datetime import timezone
     age_h = (dt.datetime.now(timezone.utc) - captured["cutoff"]).total_seconds() / 3600
     assert 71.9 < age_h < 72.1
+
+
+
+# ---------- Apple pipeline ----------
+
+def test_apple_salary_regex():
+    import apple_jobs_pipeline as ap
+    m = ap.PAY_RANGE_RE.search("base pay range for this role is between $135,400 and $250,600")
+    assert m and "135,400" in m.group(1)
+
+def test_apple_nanosecond_timestamp_parse(monkeypatch):
+    import apple_jobs_pipeline as ap
+    import datetime as dt
+    from datetime import timezone
+    now = dt.datetime.now(timezone.utc)
+    fresh = now.strftime("%Y-%m-%dT%H:%M:%S") + ".426936022Z"   # 9-digit fraction
+    pages = [{"res": {"searchResults": [{"id": "PIPE-1", "postDateInGMT": fresh,
+                                          "postingTitle": "Software Engineer"}]}},
+             {"res": {"searchResults": []}}]
+    calls = []
+    def fake_post(url, body, retries=2):
+        page = pages[min(len(calls), 1)]
+        calls.append(1)
+        return page
+    monkeypatch.setattr(ap, "_post", fake_post)
+    monkeypatch.setattr(ap.time, "sleep", lambda s: None)
+    jobs = ap.fetch_recent_jobs(now - dt.timedelta(hours=24))
+    assert len(jobs) == 1
+
+def test_apple_sort_software_first():
+    import apple_jobs_pipeline as ap
+    jobs = [{"postingTitle": "Retail Specialist"}, {"postingTitle": "Software Engineer - Cloud"},
+            {"postingTitle": "Machine Learning Engineer"}]
+    out = [j["postingTitle"] for j in ap.sort_software_first(jobs)]
+    assert out[0] == "Software Engineer - Cloud" and out[-1] == "Retail Specialist"
+
+
+def test_company_states_are_isolated(monkeypatch):
+    jobs_ms = [{"id": f"ms{i}", "name": f"SDE {i}"} for i in range(5)]
+    jobs_ap = [{"id": f"ap{i}", "postingTitle": f"SWE {i}"} for i in range(5)]
+    fa, c = _setup_fa(monkeypatch, jobs_ms)
+    import apple_jobs_pipeline as ap
+    monkeypatch.setattr(ap, "get_jobs", lambda cutoff=None: list(jobs_ap))
+    monkeypatch.setattr(ap, "render_posts", lambda b: f"<{len(b)}>")
+    fa.batch_run("microsoft", "t", "x")
+    fa.batch_run("apple", "t", "x")
+    ms_state = json.loads(c.blobs["state.json"])
+    ap_state = json.loads(c.blobs["apple_state.json"])
+    assert len(ms_state["sent_ids"]) == 5 and len(ap_state["sent_ids"]) == 5
+    assert set(ms_state["sent_ids"]).isdisjoint(ap_state["sent_ids"])

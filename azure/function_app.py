@@ -1,12 +1,13 @@
 """
-Azure Functions (Python v2 model) — 3 sends per day (ET):
-- batch_7am:  7:00 AM ET
-- batch_2pm:  2:00 PM ET
-- batch_7pm:  7:00 PM ET
-Each run emails only jobs posted since the previous run (no duplicates),
-up to BATCH_SIZE per email; extras are parked and drained next run.
-State (last run time, parked jobs, sent ids) lives in blob storage.
-- run_now: HTTP trigger (function key) to run a batch on demand / debug
+Azure Functions (Python v2 model) — Microsoft + Apple job emails.
+4 sends per day per company (ET): 7 AM, 12 PM, 5 PM, 9 PM.
+Each send contains only jobs posted since that company's previous send
+(no duplicates); extras are parked and drained next run. Per-company
+state lives in blob storage.
+
+HTTP triggers:
+  run_now?company=microsoft|apple&hours=N   manual/catch-up run
+  test_email                                email delivery check
 """
 
 import os
@@ -22,12 +23,19 @@ from email.mime.text import MIMEText
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient
 
-import ms_jobs_pipeline as pipeline
+import ms_jobs_pipeline
+import apple_jobs_pipeline
 
 app = func.FunctionApp()
 
 BATCH_SIZE = int(os.getenv("MAX_JOBS_TOTAL", "50"))
-STATE_BLOB = "state.json"
+
+COMPANIES = {
+    "microsoft": {"pipeline": ms_jobs_pipeline, "state": "state.json",
+                  "prefix": "post", "subject": "\U0001F680 Microsoft jobs LinkedIn posts"},
+    "apple": {"pipeline": apple_jobs_pipeline, "state": "apple_state.json",
+              "prefix": "apple_post", "subject": "\U0001F34F Apple jobs LinkedIn posts"},
+}
 
 
 def _container():
@@ -40,27 +48,27 @@ def _container():
     return c
 
 
-def _load_state(c):
+def _load_state(c, blob):
     try:
-        return json.loads(c.download_blob(STATE_BLOB).readall())
+        return json.loads(c.download_blob(blob).readall())
     except Exception:
         return {"last_run": None, "parked": [], "sent_ids": []}
 
 
-def _save_state(c, state):
+def _save_state(c, blob, state):
     state["sent_ids"] = state.get("sent_ids", [])[-500:]
-    c.upload_blob(STATE_BLOB, json.dumps(state), overwrite=True)
+    c.upload_blob(blob, json.dumps(state), overwrite=True)
 
 
-def _send_email(post, label):
+def _send_email(post, subject_prefix, label):
     user = os.environ.get("GMAIL_USERNAME")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
     to = os.environ.get("MAIL_TO")
     if not (user and pwd and to):
         return "email not configured"
     msg = MIMEText(post, "plain", "utf-8")
-    msg["Subject"] = f"🚀 Microsoft jobs LinkedIn posts {label} — {datetime.date.today():%B %d, %Y}"
-    msg["From"] = f"MS Jobs Bot <{user}>"
+    msg["Subject"] = f"{subject_prefix} {label} — {datetime.date.today():%B %d, %Y}"
+    msg["From"] = f"Jobs Bot <{user}>"
     msg["To"] = to
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
         s.login(user, pwd)
@@ -68,11 +76,11 @@ def _send_email(post, label):
     return f"emailed to {to}"
 
 
-def batch_run(label, blob_suffix, lookback_hours=None):
-    """Fetch jobs since last run, drain parked ones first, send up to BATCH_SIZE.
-    lookback_hours overrides the window (catch-up runs); normally cutoff = last run."""
+def batch_run(company, label, blob_suffix, lookback_hours=None):
+    cfg = COMPANIES[company]
+    pipeline, state_blob = cfg["pipeline"], cfg["state"]
     c = _container()
-    state = _load_state(c)
+    state = _load_state(c, state_blob)
     now = datetime.datetime.now(timezone.utc)
 
     if lookback_hours:
@@ -94,71 +102,71 @@ def batch_run(label, blob_suffix, lookback_hours=None):
 
     if not queue:
         state["last_run"] = now.isoformat()
-        _save_state(c, state)
-        return [f"no new jobs since {cutoff:%H:%M UTC}"]
+        _save_state(c, state_blob, state)
+        return [f"{company}: no new jobs since {cutoff:%H:%M UTC}"]
 
     batch, rest = queue[:BATCH_SIZE], queue[BATCH_SIZE:]
     post = pipeline.render_posts(batch)
 
     notes = []
-    blob_name = f"post_{datetime.date.today().isoformat()}_{blob_suffix}.txt"
+    blob_name = f"{cfg['prefix']}_{datetime.date.today().isoformat()}_{blob_suffix}.txt"
     c.upload_blob(blob_name, post, overwrite=True)
-    notes.append(f"blob saved: {blob_name} ({len(batch)} jobs)")
+    notes.append(f"{company}: blob {blob_name} ({len(batch)} jobs)")
     try:
-        notes.append(_send_email(post, f"({label} — {len(batch)} jobs)"))
+        notes.append(_send_email(post, cfg["subject"], f"({label} — {len(batch)} jobs)"))
     except Exception as e:
         notes.append(f"email failed: {e}")
 
     state["last_run"] = now.isoformat()
     state["parked"] = rest
     state["sent_ids"] = list(sent_ids) + [j.get("id") for j in batch]
-    _save_state(c, state)
+    _save_state(c, state_blob, state)
     if rest:
-        notes.append(f"{len(rest)} jobs parked for the next send")
+        notes.append(f"{len(rest)} parked for next send")
     return notes
+
+
+def _run_both(label, suffix):
+    for company in COMPANIES:
+        try:
+            logging.info("%s %s: %s", company, label, "; ".join(batch_run(company, label, suffix)))
+        except Exception:
+            logging.error("%s %s crashed:\n%s", company, label, traceback.format_exc())
 
 
 # 11:00 UTC = 7:00 AM ET (summer)
 @app.timer_trigger(schedule="0 0 11 * * *", arg_name="timer", run_on_startup=False)
 def batch_7am(timer: func.TimerRequest) -> None:
-    try:
-        logging.info("7 AM batch: %s", "; ".join(batch_run("7 AM batch", "0700")))
-    except Exception:
-        logging.error("7 AM batch crashed:\n%s", traceback.format_exc())
+    _run_both("7 AM batch", "0700")
 
 
 # 16:00 UTC = 12:00 PM ET (summer)
 @app.timer_trigger(schedule="0 0 16 * * *", arg_name="timer", run_on_startup=False)
 def batch_12pm(timer: func.TimerRequest) -> None:
-    try:
-        logging.info("12 PM batch: %s", "; ".join(batch_run("12 PM batch", "1200")))
-    except Exception:
-        logging.error("12 PM batch crashed:\n%s", traceback.format_exc())
+    _run_both("12 PM batch", "1200")
 
 
 # 21:00 UTC = 5:00 PM ET (summer)
 @app.timer_trigger(schedule="0 0 21 * * *", arg_name="timer", run_on_startup=False)
 def batch_5pm(timer: func.TimerRequest) -> None:
-    try:
-        logging.info("5 PM batch: %s", "; ".join(batch_run("5 PM batch", "1700")))
-    except Exception:
-        logging.error("5 PM batch crashed:\n%s", traceback.format_exc())
+    _run_both("5 PM batch", "1700")
 
 
 # 01:00 UTC = 9:00 PM ET (summer)
 @app.timer_trigger(schedule="0 0 1 * * *", arg_name="timer", run_on_startup=False)
 def batch_9pm(timer: func.TimerRequest) -> None:
-    try:
-        logging.info("9 PM batch: %s", "; ".join(batch_run("9 PM batch", "2100")))
-    except Exception:
-        logging.error("9 PM batch crashed:\n%s", traceback.format_exc())
+    _run_both("9 PM batch", "2100")
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
 def run_now(req: func.HttpRequest) -> func.HttpResponse:
     try:
         hours = int(req.params.get("hours", "0")) or None
-        notes = batch_run("manual batch", "manual", lookback_hours=hours)
+        company = req.params.get("company", "")
+        targets = [company] if company in COMPANIES else list(COMPANIES)
+        notes = []
+        for t in targets:
+            notes += batch_run(t, "manual batch", "manual", lookback_hours=hours)
         return func.HttpResponse("NOTES: " + "; ".join(notes), status_code=200,
                                  mimetype="text/plain; charset=utf-8")
     except Exception:
@@ -168,14 +176,13 @@ def run_now(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="test_email", auth_level=func.AuthLevel.FUNCTION)
 def test_email(req: func.HttpRequest) -> func.HttpResponse:
-    """Send a tiny test email and report exactly what happened."""
     try:
         user = os.environ.get("GMAIL_USERNAME")
         to = os.environ.get("MAIL_TO")
         info = [f"GMAIL_USERNAME set: {bool(user)}",
                 f"GMAIL_APP_PASSWORD set: {bool(os.environ.get('GMAIL_APP_PASSWORD'))}",
                 f"MAIL_TO: {to}"]
-        result = _send_email("Test email from your MS Jobs bot — delivery works! ✅", "(delivery test)")
+        result = _send_email("Test email — delivery works! ✅", "\U0001F9EA Jobs bot", "(delivery test)")
         return func.HttpResponse("\n".join(info) + "\nRESULT: " + result, status_code=200,
                                  mimetype="text/plain; charset=utf-8")
     except Exception:
