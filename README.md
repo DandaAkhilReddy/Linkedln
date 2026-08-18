@@ -1,6 +1,6 @@
 # Big Tech Jobs → LinkedIn Post Automation
 
-Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, and **Google** 🔍 job openings — with salary, level, and links — delivered to your inbox 4x daily.
+Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, and **Google** 🔍 job openings — with salary, level, and links — delivered to your inbox 2x daily (7 AM & 2 PM ET).
 
 Every day at 7 AM ET, a GitHub Action fetches Microsoft roles posted in the last 24 hours (with salary for US postings), formats a copy-paste-ready LinkedIn post, and delivers it two ways:
 
@@ -66,6 +66,6 @@ The production automation runs in Azure (resource group `automated-email`):
 
 1. Fork or clone this repo — there are no secrets in it; everything below is yours to configure.
 2. **GitHub Actions path (simplest):** add repo secrets `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD` (from myaccount.google.com/apppasswords, needs 2FA), and `MAIL_TO`. The workflow in `.github/workflows/daily-post.yml` then opens a daily GitHub Issue with the posts and emails them.
-3. **Azure path (what powers the original):** deploy `azure/` + `ms_jobs_pipeline.py` to a Python 3.11 Linux consumption Function App, and set app settings `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO` (plus optional `MAX_JOBS_TOTAL`, `JOBS_PER_POST`, `FILTER_COUNTRY`). Four timers send at 7 AM / 12 PM / 5 PM / 9 PM ET.
+3. **Azure path (what powers the original):** deploy `azure/` + `ms_jobs_pipeline.py` to a Python 3.11 Linux consumption Function App, and set app settings `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO` (plus optional `MAX_JOBS_TOTAL`, `JOBS_PER_POST`, `FILTER_COUNTRY`). Two timers send at 7 AM and 2 PM ET.
 4. Run tests with `pip install -r requirements.txt pytest azure-functions azure-storage-blob && pytest tests/`.
 5. Point it at any Eightfold-powered careers site by changing `BASE` and `DOMAIN` in `ms_jobs_pipeline.py`.

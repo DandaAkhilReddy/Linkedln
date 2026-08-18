@@ -1,6 +1,6 @@
 """
 Azure Functions (Python v2 model) — Microsoft + Apple + Google job emails.
-4 sends per day per company (ET): 7 AM, 12 PM, 5 PM, 9 PM.
+2 sends per day per company (ET): 7 AM and 2 PM.
 Each send contains only jobs posted since that company's previous send
 (no duplicates); extras are parked and drained next run. Per-company
 state lives in blob storage.
@@ -143,22 +143,10 @@ def batch_7am(timer: func.TimerRequest) -> None:
     _run_both("7 AM batch", "0700")
 
 
-# 16:00 UTC = 12:00 PM ET (summer)
-@app.timer_trigger(schedule="0 0 16 * * *", arg_name="timer", run_on_startup=False)
-def batch_12pm(timer: func.TimerRequest) -> None:
-    _run_both("12 PM batch", "1200")
-
-
-# 21:00 UTC = 5:00 PM ET (summer)
-@app.timer_trigger(schedule="0 0 21 * * *", arg_name="timer", run_on_startup=False)
-def batch_5pm(timer: func.TimerRequest) -> None:
-    _run_both("5 PM batch", "1700")
-
-
-# 01:00 UTC = 9:00 PM ET (summer)
-@app.timer_trigger(schedule="0 0 1 * * *", arg_name="timer", run_on_startup=False)
-def batch_9pm(timer: func.TimerRequest) -> None:
-    _run_both("9 PM batch", "2100")
+# 18:00 UTC = 2:00 PM ET (summer)
+@app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
+def batch_2pm(timer: func.TimerRequest) -> None:
+    _run_both("2 PM batch", "1400")
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)

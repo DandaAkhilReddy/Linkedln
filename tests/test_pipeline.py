@@ -149,14 +149,12 @@ def test_no_jobs_no_email(monkeypatch):
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
 
-def test_all_four_timers_exist():
+def test_two_timers_exist():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     assert '"0 0 11 * * *"' in src   # 7 AM ET
-    assert '"0 0 16 * * *"' in src   # 12 PM ET
-    assert '"0 0 21 * * *"' in src   # 5 PM ET
-    assert '"0 0 1 * * *"' in src    # 9 PM ET
-    assert src.count("timer_trigger") == 4
+    assert '"0 0 18 * * *"' in src   # 2 PM ET
+    assert src.count("timer_trigger") == 2
 
 
 def test_catchup_lookback_override(monkeypatch):
