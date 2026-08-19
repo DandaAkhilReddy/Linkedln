@@ -1,21 +1,15 @@
-"""One-shot probe: can a GitHub Actions runner reach Meta's careers GraphQL?"""
-import re, json, requests, sys
+"""Probe 2: Chrome TLS impersonation via curl_cffi against Meta careers GraphQL."""
+import re, json, sys
+from curl_cffi import requests as creq
 
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-S = requests.Session()
-S.headers.update({"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
-
-r = S.get("https://www.metacareers.com/jobsearch/", timeout=30,
-          headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-                   "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate",
-                   "Sec-Fetch-Site": "none"})
+S = creq.Session(impersonate="chrome124")
+r = S.get("https://www.metacareers.com/jobsearch/", timeout=30)
 print("PAGE:", r.status_code, len(r.text))
 m = re.search(r'"LSD",\[\],\{"token":"([^"]+)"', r.text)
 if not m:
-    print("NO LSD TOKEN"); sys.exit(0)
+    print("NO LSD"); sys.exit(0)
 lsd = m.group(1)
-print("LSD ok")
+print("LSD ok, cookies:", list(S.cookies.keys()))
 
 SI = {"q": None, "divisions": [], "offices": [], "roles": [], "leadership_levels": [],
       "saved_jobs": [], "saved_searches": [], "sub_teams": [], "teams": [],
@@ -24,20 +18,25 @@ SI = {"q": None, "divisions": [], "offices": [], "roles": [], "leadership_levels
 
 def gql(doc_id, variables, tag):
     resp = S.post("https://www.metacareers.com/graphql",
-                  headers={"Content-Type": "application/x-www-form-urlencoded",
-                           "x-fb-lsd": lsd, "Origin": "https://www.metacareers.com",
-                           "Referer": "https://www.metacareers.com/jobsearch/"},
-                  data={"lsd": lsd, "doc_id": doc_id,
-                        "variables": json.dumps(variables)}, timeout=30)
-    body = resp.text[:400].replace("\n", " ")
-    print(f"[{tag}] HTTP {resp.status_code} :: {body[:300]}")
+                  headers={"x-fb-lsd": lsd, "Origin": "https://www.metacareers.com",
+                           "Referer": "https://www.metacareers.com/jobsearch/",
+                           "Content-Type": "application/x-www-form-urlencoded"},
+                  data={"lsd": lsd, "doc_id": doc_id, "variables": json.dumps(variables)},
+                  timeout=30)
+    print(f"[{tag}] HTTP {resp.status_code} :: {resp.text[:250]}".replace("\n", " "))
     return resp
 
-# 1) known-good count query
 gql("26446976041587120", {"search_input": SI}, "count")
-# 2) results query variants
-gql("27506805582236862", {"isLoggedIn": False, "viewasUserID": None, "search_input": SI}, "resultsA")
-gql("27506805582236862", {"search_input": SI}, "resultsB")
+r2 = gql("27506805582236862", {"isLoggedIn": False, "viewasUserID": None, "search_input": SI}, "resultsA")
+if r2.status_code == 200:
+    try:
+        d = r2.json()
+        blob = json.dumps(d)
+        print("RESULTS SIZE:", len(blob))
+        ids = re.findall(r'"id":"(\d{10,20})"', blob)[:5]
+        titles = re.findall(r'"title":"([^"]{5,60})"', blob)[:5]
+        print("IDS:", ids)
+        print("TITLES:", titles)
+    except Exception as e:
+        print("parse err:", e)
 gql("27129360303422352", {"isLoggedIn": False, "viewasUserID": None, "search_input": SI}, "resultsV2A")
-gql("26210170368675892", {"search_input": SI}, "hideV2")
-gql("27808175508766384", {"isLoggedIn": False, "viewasUserID": None, "search_input": SI}, "CPJobSearch")
