@@ -9,6 +9,7 @@ Meta listings expose NO posting dates, so novelty is tracked purely by job id
 locations ending in a US state code, or containing "United States"/"Remote, US".
 """
 
+import os
 import re
 import json
 import logging
@@ -18,7 +19,7 @@ log = logging.getLogger("meta-jobs")
 
 BASE = "https://www.metacareers.com"
 DOC_ID_RESULTS = "27506805582236862"   # CareersJobSearchResultsDataQuery
-JOBS_PER_POST = 10
+JOBS_PER_POST = int(os.getenv("JOBS_PER_POST", "10"))
 
 US_LOC_RE = re.compile(r", [A-Z]{2}$")
 
