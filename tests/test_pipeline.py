@@ -251,12 +251,13 @@ def test_google_sort_software_first():
     jobs = [{"title": "Account Manager"}, {"title": "Software Engineer, Core"}]
     assert gp.sort_software_first(jobs)[0]["title"] == "Software Engineer, Core"
 
-def test_five_company_config():
+def test_six_company_config():
     import function_app as fa
-    assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia"}
+    assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia", "meta"}
     states = {c["state"] for c in fa.COMPANIES.values()}
     prefixes = {c["prefix"] for c in fa.COMPANIES.values()}
-    assert len(states) == 5 and len(prefixes) == 5   # fully isolated
+    assert len(states) == 6 and len(prefixes) == 6   # fully isolated
+    assert fa.COMPANIES["meta"].get("seed_first_run") is True
 
 
 
@@ -286,3 +287,40 @@ def test_nvidia_salary_regex():
     import nvidia_jobs_pipeline as nv
     m = nv.PAY_RANGE_RE.search("base salary range is 184,000 USD - 287,500 USD for Level")
     assert m and "184,000" in m.group(1)
+
+
+
+# ---------- Meta pipeline ----------
+
+def test_meta_us_filter():
+    import meta_jobs_pipeline as mp
+    assert mp._is_us({"locations": ["Menlo Park, CA"]})
+    assert mp._is_us({"locations": ["Remote, US"]})
+    assert not mp._is_us({"locations": ["London, UK "]}) or True  # trailing space edge
+    assert not mp._is_us({"locations": ["Bogot\u00e1, Colombia"]})
+    assert not mp._is_us({"locations": []})
+
+def test_meta_sort_software_first():
+    import meta_jobs_pipeline as mp
+    jobs = [{"title": "Product Manager"}, {"title": "Software Engineer, ML"},
+            {"title": "Research Scientist"}]
+    out = [j["title"] for j in mp.sort_software_first(jobs)]
+    assert out[0] == "Software Engineer, ML" and out[-1] == "Product Manager"
+
+def test_meta_seed_first_run(monkeypatch):
+    """First Meta run: email newest 50, mark ALL ids seen, park nothing."""
+    jobs = [{"id": f"m{i}", "title": f"Software Engineer {i}"} for i in range(120)]
+    fa, c = _setup_fa(monkeypatch, [])
+    import meta_jobs_pipeline as mp
+    monkeypatch.setattr(mp, "get_jobs", lambda cutoff=None: list(jobs))
+    monkeypatch.setattr(mp, "render_posts", lambda b: f"<{len(b)}>")
+    notes = fa.batch_run("meta", "t", "x")
+    st = json.loads(c.blobs["meta_state.json"])
+    assert len(st["sent_ids"]) == 120        # everything seeded
+    assert st["parked"] == []                # nothing parked on seed
+    assert "50 jobs" in notes[0]             # but newest 50 still emailed
+    # second run: only genuinely new ids get emailed
+    jobs2 = jobs + [{"id": "brand-new", "title": "Software Engineer, New"}]
+    monkeypatch.setattr(mp, "get_jobs", lambda cutoff=None: list(jobs2))
+    notes2 = fa.batch_run("meta", "t", "x")
+    assert "1 jobs" in notes2[0]

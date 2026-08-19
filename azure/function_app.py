@@ -1,5 +1,5 @@
 """
-Azure Functions (Python v2 model) — Microsoft + Apple + Google + Amazon + NVIDIA job emails.
+Azure Functions (Python v2 model) — Microsoft/Apple/Google/Amazon/NVIDIA/Meta job emails.
 2 sends per day per company (ET): 7 AM and 2 PM.
 Each send contains only jobs posted since that company's previous send
 (no duplicates); extras are parked and drained next run. Per-company
@@ -28,6 +28,7 @@ import apple_jobs_pipeline
 import google_jobs_pipeline
 import amazon_jobs_pipeline
 import nvidia_jobs_pipeline
+import meta_jobs_pipeline
 
 app = func.FunctionApp()
 
@@ -44,11 +45,15 @@ COMPANIES = {
                "prefix": "amazon_post", "subject": "\U0001F4E6 Amazon jobs LinkedIn posts"},
     "nvidia": {"pipeline": nvidia_jobs_pipeline, "state": "nvidia_state.json",
                "prefix": "nvidia_post", "subject": "\U0001F49A NVIDIA jobs LinkedIn posts"},
+    # Meta exposes no posting dates: first run seeds all current ids, then only new ids email
+    "meta": {"pipeline": meta_jobs_pipeline, "state": "meta_state.json",
+             "prefix": "meta_post", "subject": "Ⓜ️ Meta jobs LinkedIn posts",
+             "seed_first_run": True},
 }
 
 # Split across invocations so each stays under the 10-minute function timeout
 GROUP_A = ["microsoft", "apple", "google"]
-GROUP_B = ["amazon", "nvidia"]
+GROUP_B = ["amazon", "nvidia", "meta"]
 
 
 def _container():
@@ -69,7 +74,7 @@ def _load_state(c, blob):
 
 
 def _save_state(c, blob, state):
-    state["sent_ids"] = state.get("sent_ids", [])[-500:]
+    state["sent_ids"] = state.get("sent_ids", [])[-5000:]
     c.upload_blob(blob, json.dumps(state), overwrite=True)
 
 
@@ -118,7 +123,9 @@ def batch_run(company, label, blob_suffix, lookback_hours=None):
         _save_state(c, state_blob, state)
         return [f"{company}: no new jobs since {cutoff:%H:%M UTC}"]
 
-    batch, rest = queue[:BATCH_SIZE], queue[BATCH_SIZE:]
+    seeding = cfg.get("seed_first_run") and not state.get("last_run")
+    batch = queue[:BATCH_SIZE]
+    rest = [] if seeding else queue[BATCH_SIZE:]
     post = pipeline.render_posts(batch)
 
     notes = []
@@ -132,7 +139,7 @@ def batch_run(company, label, blob_suffix, lookback_hours=None):
 
     state["last_run"] = now.isoformat()
     state["parked"] = rest
-    state["sent_ids"] = list(sent_ids) + [j.get("id") for j in batch]
+    state["sent_ids"] = list(sent_ids) + [j.get("id") for j in (queue if seeding else batch)]
     _save_state(c, state_blob, state)
     if rest:
         notes.append(f"{len(rest)} parked for next send")
