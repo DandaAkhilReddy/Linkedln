@@ -29,6 +29,12 @@ import google_jobs_pipeline
 import amazon_jobs_pipeline
 import nvidia_jobs_pipeline
 import meta_jobs_pipeline
+import openai_jobs_pipeline
+import anthropic_jobs_pipeline
+import netflix_jobs_pipeline
+import xai_jobs_pipeline
+import linkedin_autopost
+import card_builder
 
 app = func.FunctionApp()
 
@@ -49,11 +55,23 @@ COMPANIES = {
     "meta": {"pipeline": meta_jobs_pipeline, "state": "meta_state.json",
              "prefix": "meta_post", "subject": "Ⓜ️ Meta jobs LinkedIn posts",
              "seed_first_run": True},
+    "openai": {"pipeline": openai_jobs_pipeline, "state": "openai_state.json",
+               "prefix": "openai_post", "subject": "\U0001F916 OpenAI jobs LinkedIn posts"},
+    # Greenhouse updated_at churns on edits: seed first run, then only new ids
+    "anthropic": {"pipeline": anthropic_jobs_pipeline, "state": "anthropic_state.json",
+                  "prefix": "anthropic_post", "subject": "✳️ Anthropic jobs LinkedIn posts",
+                  "seed_first_run": True},
+    "netflix": {"pipeline": netflix_jobs_pipeline, "state": "netflix_state.json",
+                "prefix": "netflix_post", "subject": "\U0001F3AC Netflix jobs LinkedIn posts"},
+    "xai": {"pipeline": xai_jobs_pipeline, "state": "xai_state.json",
+            "prefix": "xai_post", "subject": "✖️ xAI jobs LinkedIn posts",
+            "seed_first_run": True},
 }
 
 # Split across invocations so each stays under the 10-minute function timeout
 GROUP_A = ["microsoft", "apple", "google"]
 GROUP_B = ["amazon", "nvidia", "meta"]
+GROUP_C = ["openai", "anthropic", "netflix", "xai"]
 
 
 def _container():
@@ -166,6 +184,12 @@ def batch_7am_b(timer: func.TimerRequest) -> None:
     _run_group(GROUP_B, "7 AM batch", "0700")
 
 
+# 11:40 UTC — OpenAI, Anthropic, Netflix, xAI
+@app.timer_trigger(schedule="0 40 11 * * *", arg_name="timer", run_on_startup=False)
+def batch_7am_c(timer: func.TimerRequest) -> None:
+    _run_group(GROUP_C, "7 AM batch", "0700")
+
+
 # 18:00 UTC = 2:00 PM ET (summer) — Microsoft, Apple, Google
 @app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
 def batch_2pm(timer: func.TimerRequest) -> None:
@@ -176,6 +200,12 @@ def batch_2pm(timer: func.TimerRequest) -> None:
 @app.timer_trigger(schedule="0 20 18 * * *", arg_name="timer", run_on_startup=False)
 def batch_2pm_b(timer: func.TimerRequest) -> None:
     _run_group(GROUP_B, "2 PM batch", "1400")
+
+
+# 18:40 UTC — OpenAI, Anthropic, Netflix, xAI
+@app.timer_trigger(schedule="0 40 18 * * *", arg_name="timer", run_on_startup=False)
+def batch_2pm_c(timer: func.TimerRequest) -> None:
+    _run_group(GROUP_C, "2 PM batch", "1400")
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
@@ -207,4 +237,80 @@ def test_email(req: func.HttpRequest) -> func.HttpResponse:
                                  mimetype="text/plain; charset=utf-8")
     except Exception:
         return func.HttpResponse("EMAIL ERROR:\n" + traceback.format_exc(), status_code=500,
+                                 mimetype="text/plain; charset=utf-8")
+
+
+# ---------------- LinkedIn auto-poster wiring ----------------
+linkedin_autopost._set_companies(COMPANIES)
+
+
+def _logo_loader(company):
+    """Pull a company logo PNG from the 'linkedin-logos' blob container."""
+    try:
+        conn = os.environ["AzureWebJobsStorage"]
+        lc = BlobServiceClient.from_connection_string(conn).get_container_client("linkedin-logos")
+        return lc.download_blob(f"{company}.png").readall()
+    except Exception:
+        return None
+
+
+# 12:00 UTC = 8:00 AM ET — build + queue the day's LinkedIn cards
+@app.timer_trigger(schedule="0 0 12 * * *", arg_name="timer", run_on_startup=False)
+def linkedin_generate_a(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI gen A: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_A)))
+    except Exception:
+        logging.error("LI gen A crashed:\n%s", traceback.format_exc())
+
+
+@app.timer_trigger(schedule="0 20 12 * * *", arg_name="timer", run_on_startup=False)
+def linkedin_generate_b(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI gen B: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_B)))
+    except Exception:
+        logging.error("LI gen B crashed:\n%s", traceback.format_exc())
+
+
+@app.timer_trigger(schedule="0 30 12 * * *", arg_name="timer", run_on_startup=False)
+def linkedin_generate_c(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI gen C: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_C)))
+    except Exception:
+        logging.error("LI gen C crashed:\n%s", traceback.format_exc())
+
+
+# every 15 min — drip-post any due cards
+@app.timer_trigger(schedule="0 10/15 * * * *", arg_name="timer", run_on_startup=False)
+def linkedin_drain(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI drain: %s", "; ".join(linkedin_autopost.drain(_container())))
+    except Exception:
+        logging.error("LI drain crashed:\n%s", traceback.format_exc())
+
+
+@app.route(route="linkedin_run", auth_level=func.AuthLevel.FUNCTION)
+def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
+    """Manual: ?action=generate | drain | testcard&company=microsoft"""
+    try:
+        action = req.params.get("action", "drain")
+        c = _container()
+        if action == "generate":
+            g = req.params.get("group", "")
+            subset = GROUP_A if g == "a" else GROUP_B if g == "b" else GROUP_C if g == "c" else None
+            out = linkedin_autopost.generate(c, _logo_loader, subset)
+        elif action == "testcard":
+            company = req.params.get("company", "microsoft")
+            jobs = COMPANIES[company]["pipeline"].get_jobs()[:6]
+            png = card_builder.build_card(company, jobs, logo_loader=_logo_loader)
+            import linkedin_client
+            share = linkedin_client.post_with_image(
+                linkedin_autopost._caption(company, jobs, 1, 1), png,
+                title=f"{company.title()} is hiring")
+            out = [f"test card posted: {share}"]
+        else:
+            out = linkedin_autopost.drain(c)
+        return func.HttpResponse("NOTES: " + "; ".join(out), status_code=200,
+                                 mimetype="text/plain; charset=utf-8")
+    except Exception:
+        return func.HttpResponse("CRASH:\n" + traceback.format_exc(), status_code=500,
                                  mimetype="text/plain; charset=utf-8")

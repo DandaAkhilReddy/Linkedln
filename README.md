@@ -1,6 +1,6 @@
 # Big Tech Jobs → LinkedIn Post Automation
 
-Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, **Google** 🔍, **Amazon** 📦, **NVIDIA** 💚, and **Meta** Ⓜ️ job openings — with salary, level, and links — delivered to your inbox 2x daily (7 AM & 2 PM ET).
+Daily ready-to-paste LinkedIn posts for new **Microsoft** 🚀, **Apple** 🍏, **Google** 🔍, **Amazon** 📦, **NVIDIA** 💚, **Meta** Ⓜ️, **OpenAI** 🤖, **Anthropic** ✳️, **Netflix** 🎬, and **xAI** ✖️ job openings — with salary, level, and links — delivered to your inbox 2x daily (7 AM & 2 PM ET).
 
 Every day at 7 AM ET, a GitHub Action fetches Microsoft roles posted in the last 24 hours (with salary for US postings), formats a copy-paste-ready LinkedIn post, and delivers it two ways:
 
@@ -54,11 +54,23 @@ Schedule is the `cron` line (`0 11 * * *` = 11:00 UTC = 7 AM EDT). Salary (💰)
 - If a run finds no new jobs, no issue/email is sent that day.
 - Each run also uploads `post.txt` as a workflow artifact (backup copy).
 
+## LinkedIn auto-poster (official API)
+
+Beyond the emails, the Azure app auto-posts to LinkedIn via the **official LinkedIn API** (`w_member_social`, legacy `/v2/ugcPosts` + asset upload) — no scraping, ToS-safe:
+
+- `card_builder.py` — 1200×627 branded card per post: big auto-cropped company logo on white (top ~70%), themed gradient with roles + 💰 salary below
+- `linkedin_autopost.py` — daily `generate` builds up to 5 cards/company from *new* jobs only and queues them; `drain` (every 15 min, offset :10 to avoid queue write races) drip-posts ~25 min apart
+- Captions carry 💼 title / 📍 location / 🎯 team / 💰 salary / 🔗 apply link per job, capped under LinkedIn's 3,000-char limit
+- Config + token live in blob (`li_secrets.json`); toggle with `linkedin_autopost_enabled`
+- Company logos in `logos/` are uploaded to the `linkedin-logos` blob container
+
+Job sources: Microsoft & Netflix (Eightfold), Apple, Google, Amazon, NVIDIA (Workday), Meta (GraphQL via curl_cffi), OpenAI (Ashby, salary included), Anthropic & xAI (Greenhouse — `seed_first_run` because `updated_at` churns).
+
 ## Azure deployment (currently live)
 
 The production automation runs in Azure (resource group `automated-email`):
 
-- `func-linkedin-jobs-26418` — two timers: **7 AM ET** first 50 jobs (software engineers first), **10 AM PT** overflow batch if more than 50
+- `func-linkedin-jobs-26418` — email timers **7 AM & 2 PM ET** in three staggered waves (10 companies), LinkedIn generate timers 8:00/8:20/8:30 AM ET, drain every 15 min
 - Posts saved to blob container `linkedin-posts`, emailed via Gmail SMTP
 - Code for the function is in `azure/` + `ms_jobs_pipeline.py`
 

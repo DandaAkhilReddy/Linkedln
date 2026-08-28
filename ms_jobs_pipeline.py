@@ -133,7 +133,7 @@ def build_post(jobs, date_str, part=None, total_parts=None):
     lines = [header, "", "Fresh roles posted in the last 24 hours \U0001F447", ""]
 
     for j in jobs:
-        d = fetch_detail(j.get("id"))
+        d = j.get("_detail") or fetch_detail(j.get("id"))
         location = ", ".join((j.get("locations") or ["Multiple Locations"])[:2])
 
         lines.append(f"\U0001F4BC {j.get('name', 'Untitled Role')}")

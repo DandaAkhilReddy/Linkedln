@@ -149,13 +149,18 @@ def test_no_jobs_no_email(monkeypatch):
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
 
-def test_timers_cover_both_groups():
+def test_timers_cover_all_groups():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     assert '"0 0 11 * * *"' in src and '"0 20 11 * * *"' in src    # 7 AM waves
+    assert '"0 40 11 * * *"' in src                                # 7 AM wave C
     assert '"0 0 18 * * *"' in src and '"0 20 18 * * *"' in src    # 2 PM waves
-    assert src.count("timer_trigger") == 4
-    assert set(fa.GROUP_A + fa.GROUP_B) == set(fa.COMPANIES)       # every company scheduled
+    assert '"0 40 18 * * *"' in src                                # 2 PM wave C
+    # 6 email timers + 3 LinkedIn generate timers + 1 drain = 10
+    assert src.count("timer_trigger") == 10
+    # drain staggered off the generate minutes (queue write race)
+    assert '"0 10/15 * * * *"' in src
+    assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C) == set(fa.COMPANIES)
 
 
 def test_catchup_lookback_override(monkeypatch):
@@ -251,13 +256,51 @@ def test_google_sort_software_first():
     jobs = [{"title": "Account Manager"}, {"title": "Software Engineer, Core"}]
     assert gp.sort_software_first(jobs)[0]["title"] == "Software Engineer, Core"
 
-def test_six_company_config():
+def test_ten_company_config():
     import function_app as fa
-    assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia", "meta"}
+    assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia",
+                                 "meta", "openai", "anthropic", "netflix", "xai"}
     states = {c["state"] for c in fa.COMPANIES.values()}
     prefixes = {c["prefix"] for c in fa.COMPANIES.values()}
-    assert len(states) == 6 and len(prefixes) == 6   # fully isolated
-    assert fa.COMPANIES["meta"].get("seed_first_run") is True
+    assert len(states) == 10 and len(prefixes) == 10   # fully isolated
+    for seeded in ("meta", "anthropic", "xai"):        # no posting dates / churny updated_at
+        assert fa.COMPANIES[seeded].get("seed_first_run") is True
+
+
+# ---------- OpenAI / Anthropic / Netflix / xAI pipelines ----------
+
+def test_openai_salary_and_sort():
+    import openai_jobs_pipeline as op
+    jobs = [{"title": "Recruiter", "name": "Recruiter"},
+            {"title": "Software Engineer, Infra", "name": "Software Engineer, Infra"}]
+    assert op.sort_software_first(jobs)[0]["title"].startswith("Software")
+
+
+def test_greenhouse_pay_regex():
+    import anthropic_jobs_pipeline as an
+    m = an.PAY_RE.search("Annual Salary: $300,000 — $405,000 USD for this role")
+    assert m and "300,000" in m.group(1)
+    import xai_jobs_pipeline as xp
+    m2 = xp.PAY_RE.search("range of $180,000 - $440,000 depending on level")
+    assert m2 and "440,000" in m2.group(1)
+
+
+def test_netflix_loc_clean_and_pay():
+    import netflix_jobs_pipeline as nf
+    assert nf._clean_loc("Los Gatos,California,United States of America") == "Los Gatos, California"
+    m = nf.PAY_RE.search("market range is typically $388,000.00 - $558,000.00")
+    assert m and "558,000" in m.group(1)
+
+
+def test_new_pipelines_build_post_from_cached_detail():
+    import openai_jobs_pipeline as op
+    j = {"id": "x1", "title": "Software Engineer", "name": "Software Engineer",
+         "locations": ["San Francisco"], "team": "Runtime",
+         "_detail": {"salary": "$266K - $445K", "snippet": "Build things.",
+                     "level": "FullTime", "emp_type": "", "url": "https://jobs.ashbyhq.com/openai/x1"}}
+    post = op.build_post([j], "August 27, 2026")
+    assert "$266K - $445K" in post and "https://jobs.ashbyhq.com/openai/x1" in post
+    assert "#OpenAICareers" in post
 
 
 
