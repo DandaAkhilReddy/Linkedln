@@ -77,11 +77,28 @@ def _job_url(company, j):
     return j.get("url") or ""
 
 
+def _loc_str(l):
+    """Amazon-style entries are serialized JSON blobs — extract City, State."""
+    if isinstance(l, str) and l.lstrip().startswith("{"):
+        try:
+            d = json.loads(l)
+            city = d.get("city")
+            st = d.get("normalizedStateName") or d.get("normalizedCountryName")
+            return ", ".join(x for x in (city, st) if x) or \
+                   d.get("locationNonStemming") or "United States"
+        except Exception:
+            import re as _re
+            m = _re.search(r'"city"\s*:\s*"([^"]+)"', l)
+            n = _re.search(r'"normalizedStateName"\s*:\s*"([^"]+)"', l)
+            return ", ".join(x.group(1) for x in (m, n) if x) or "United States"
+    return l
+
+
 def _job_loc(j):
     locs = j.get("locations")
     if isinstance(locs, list) and locs:
         if isinstance(locs[0], str):
-            return "; ".join(locs[:2])
+            return "; ".join(_loc_str(l) for l in locs[:2])
         # apple-style list of dicts
         out = []
         for l in locs[:2]:
@@ -147,7 +164,7 @@ def _caption(company, jobs, part, total):
     return cap
 
 
-def generate(container, logo_loader=None, companies=None):
+def generate(container, logo_loader=None, companies=None, hours=24):
     """Build the day's cards + queue them staggered. Returns notes."""
     if _cfg("linkedin_autopost_enabled", "false").lower() != "true":
         return ["autopost disabled (set LINKEDIN_AUTOPOST_ENABLED=true)"]
@@ -162,7 +179,7 @@ def generate(container, logo_loader=None, companies=None):
         cfg = COMPANIES[company]
         state = _load(container, _li_state_blob(company),
                       {"posted_ids": [], "last_run": None})
-        cutoff = now - timedelta(hours=24)
+        cutoff = now - timedelta(hours=hours)
         try:
             fresh = cfg["pipeline"].get_jobs(cutoff)
         except Exception as e:

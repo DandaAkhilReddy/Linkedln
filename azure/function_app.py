@@ -264,8 +264,12 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
         c = _container()
         if action == "generate":
             g = req.params.get("group", "")
-            subset = GROUP_A if g == "a" else GROUP_B if g == "b" else GROUP_C if g == "c" else None
-            out = linkedin_autopost.generate(c, _logo_loader, subset)
+            one = req.params.get("company", "")
+            hours = int(req.params.get("hours", "24"))
+            subset = ([one] if one in COMPANIES else
+                      GROUP_A if g == "a" else GROUP_B if g == "b" else
+                      GROUP_C if g == "c" else None)
+            out = linkedin_autopost.generate(c, _logo_loader, subset, hours)
         elif action == "testcard":
             company = req.params.get("company", "microsoft")
             jobs = COMPANIES[company]["pipeline"].get_jobs()[:6]
