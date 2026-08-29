@@ -149,17 +149,14 @@ def test_no_jobs_no_email(monkeypatch):
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
 
-def test_timers_cover_all_groups():
+def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
-    assert '"0 0 11 * * *"' in src and '"0 20 11 * * *"' in src    # 7 AM waves
-    assert '"0 40 11 * * *"' in src                                # 7 AM wave C
-    assert '"0 0 18 * * *"' in src and '"0 20 18 * * *"' in src    # 2 PM waves
-    assert '"0 40 18 * * *"' in src                                # 2 PM wave C
-    # 6 email timers + 3 LinkedIn generate timers + 1 drain = 10
-    assert src.count("timer_trigger") == 10
-    # drain staggered off the generate minutes (queue write race)
-    assert '"0 10/15 * * * *"' in src
+    # emails disabled: only LinkedIn generate x3 + drain remain
+    assert src.count("timer_trigger") == 4
+    assert '"0 0 12 * * *"' in src and '"0 20 12 * * *"' in src and '"0 30 12 * * *"' in src
+    assert '"0 10/15 * * * *"' in src          # drain offset from generates
+    assert '"0 0 11 * * *"' not in src         # no email timers
     assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C) == set(fa.COMPANIES)
 
 

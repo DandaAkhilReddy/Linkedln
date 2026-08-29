@@ -1,9 +1,9 @@
 """
-Azure Functions (Python v2 model) — Microsoft/Apple/Google/Amazon/NVIDIA/Meta job emails.
-2 sends per day per company (ET): 7 AM and 2 PM.
-Each send contains only jobs posted since that company's previous send
-(no duplicates); extras are parked and drained next run. Per-company
-state lives in blob storage.
+Azure Functions (Python v2 model) — big-tech jobs -> LinkedIn auto-poster.
+10 companies. LinkedIn-only: daily generate timers build branded cards
+from new jobs and a drip drain posts them via the official LinkedIn API.
+Emails are DISABLED (no email timers); batch_run/run_now remain for
+manual catch-up only. Per-company state lives in blob storage.
 
 HTTP triggers:
   run_now?company=<name>&hours=N   manual/catch-up run
@@ -172,40 +172,8 @@ def _run_group(companies, label, suffix):
             logging.error("%s %s crashed:\n%s", company, label, traceback.format_exc())
 
 
-# 11:00 UTC = 7:00 AM ET (summer) — Microsoft, Apple, Google
-@app.timer_trigger(schedule="0 0 11 * * *", arg_name="timer", run_on_startup=False)
-def batch_7am(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_A, "7 AM batch", "0700")
-
-
-# 11:20 UTC — Amazon, NVIDIA (staggered to fit the function timeout)
-@app.timer_trigger(schedule="0 20 11 * * *", arg_name="timer", run_on_startup=False)
-def batch_7am_b(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_B, "7 AM batch", "0700")
-
-
-# 11:40 UTC — OpenAI, Anthropic, Netflix, xAI
-@app.timer_trigger(schedule="0 40 11 * * *", arg_name="timer", run_on_startup=False)
-def batch_7am_c(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_C, "7 AM batch", "0700")
-
-
-# 18:00 UTC = 2:00 PM ET (summer) — Microsoft, Apple, Google
-@app.timer_trigger(schedule="0 0 18 * * *", arg_name="timer", run_on_startup=False)
-def batch_2pm(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_A, "2 PM batch", "1400")
-
-
-# 18:20 UTC — Amazon, NVIDIA
-@app.timer_trigger(schedule="0 20 18 * * *", arg_name="timer", run_on_startup=False)
-def batch_2pm_b(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_B, "2 PM batch", "1400")
-
-
-# 18:40 UTC — OpenAI, Anthropic, Netflix, xAI
-@app.timer_trigger(schedule="0 40 18 * * *", arg_name="timer", run_on_startup=False)
-def batch_2pm_c(timer: func.TimerRequest) -> None:
-    _run_group(GROUP_C, "2 PM batch", "1400")
+# ---- email timers removed (user request: LinkedIn posts only) ----
+# run_now below still allows a manual email batch if ever needed.
 
 
 @app.route(route="run_now", auth_level=func.AuthLevel.FUNCTION)
