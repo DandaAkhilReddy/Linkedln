@@ -219,9 +219,9 @@ def _chat_reply(container, subj, user_text):
         ". If (and only if) he asks for a settings change or reports a "
         "follower count, append a final line exactly like: "
         "ACTION: {\"cards_per_company\": 4} using only these keys: "
-        "linkedin_autopost_enabled ('true'/'false'), cards_per_company (1-5), "
+        "linkedin_autopost_enabled ('true'/'false'), cards_per_company (1-10), "
         "jobs_per_card (2-6), log_followers (integer). Never invent other keys. "
-        "Do not promise more than 5 posts/company (LinkedIn suppresses more).")
+        "Posts per company can be 1-10 (user accepts the reach tradeoff at high volume).")
     try:
         hist = json.loads(container.download_blob(CHAT_BLOB).readall())
     except Exception:
@@ -253,7 +253,7 @@ def _chat_reply(container, subj, user_text):
                                           overwrite=True)
                     applied.append(f"logged {int(v):,} followers")
                 elif k == "cards_per_company":
-                    sec2[k] = max(1, min(5, int(v))); applied.append(f"{k}={sec2[k]}")
+                    sec2[k] = max(1, min(10, int(v))); applied.append(f"{k}={sec2[k]}")
                 elif k == "jobs_per_card":
                     sec2[k] = max(2, min(6, int(v))); applied.append(f"{k}={sec2[k]}")
                 else:

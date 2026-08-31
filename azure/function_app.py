@@ -280,8 +280,8 @@ def growth_run(req: func.HttpRequest) -> func.HttpResponse:
                                  mimetype="text/plain; charset=utf-8")
 
 
-# every 15 min — drip-post any due cards
-@app.timer_trigger(schedule="0 10/15 * * * *", arg_name="timer", run_on_startup=False)
+# every 10 min — post exactly one due card (6/hour, 24/7)
+@app.timer_trigger(schedule="0 5/10 * * * *", arg_name="timer", run_on_startup=False)
 def linkedin_drain(timer: func.TimerRequest) -> None:
     try:
         logging.info("LI drain: %s", "; ".join(linkedin_autopost.drain(_container())))

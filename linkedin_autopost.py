@@ -34,10 +34,10 @@ def _cfg(key, default):
 
 QUEUE_BLOB = "li_queue.json"
 CARDS_PREFIX = "li_cards/"
-CARDS_PER_COMPANY = int(os.getenv("LINKEDIN_CARDS_PER_COMPANY", "5"))
+CARDS_PER_COMPANY = int(os.getenv("LINKEDIN_CARDS_PER_COMPANY", "10"))
 JOBS_PER_CARD = int(os.getenv("LINKEDIN_JOBS_PER_CARD", "4"))
-SPACING_MIN = int(os.getenv("LINKEDIN_SPACING_MIN", "25"))
-MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "2"))
+SPACING_MIN = int(os.getenv("LINKEDIN_SPACING_MIN", "10"))
+MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "1"))
 
 # imported lazily to avoid circular import with function_app
 COMPANIES = None
@@ -224,6 +224,7 @@ def generate(container, logo_loader=None, companies=None, hours=24):
     notes = []
     slot = len(queue)  # continue staggering after anything already queued
     targets = companies or list(COMPANIES)
+    per_company = []   # entries per company, merged round-robin at the end
     for company in targets:
         cfg = COMPANIES[company]
         state = _load(container, _li_state_blob(company),
@@ -236,15 +237,17 @@ def generate(container, logo_loader=None, companies=None, hours=24):
             continue
         posted = set(state.get("posted_ids", []))
         new = [j for j in fresh if str(j.get("id")) not in posted]
-        cards_cap = max(1, min(5, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
-        jpc = max(2, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
+        cards_cap = max(1, min(10, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
+        jpc = max(1, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
         new = cfg["pipeline"].sort_software_first(new)[:cards_cap * jpc]
         if not new:
             state["last_run"] = now.isoformat()
             _save(container, _li_state_blob(company), state)
             notes.append(f"{company}: no new jobs")
             continue
-        chunks = [new[i:i + jpc] for i in range(0, len(new), jpc)]
+        # divide across up to cards_cap posts (1..jpc jobs each)
+        chunks = card_builder.split_into(new, min(cards_cap, len(new)))
+        comp_entries = []
         for i, chunk in enumerate(chunks):
             # enrich for salary on the card (best-effort, bounded to this chunk)
             for j in chunk:
@@ -256,26 +259,34 @@ def generate(container, logo_loader=None, companies=None, hours=24):
                         j["salary"] = det["salary"]
                 except Exception:
                     pass
-            png = card_builder.build_card(company, chunk, part=i + 1,
-                                          total=len(chunks), logo_loader=logo_loader)
-            card_id = f"{company}_{now:%Y%m%d}_{i+1}"
-            container.upload_blob(f"{CARDS_PREFIX}{card_id}.png", png, overwrite=True)
+            card_blob = f"{CARDS_PREFIX}{company}_logo.png"
+            try:
+                container.download_blob(card_blob).readall()   # exists — reuse
+            except Exception:
+                png = card_builder.build_card(company, chunk, logo_loader=logo_loader)
+                container.upload_blob(card_blob, png, overwrite=True)
             style = random.choice(HOOK_VARIANTS)
             caption = _caption(company, chunk, i + 1, len(chunks), style)
-            added.append({
+            comp_entries.append({
                 "company": company,
-                "card_blob": f"{CARDS_PREFIX}{card_id}.png",
+                "card_blob": card_blob,
                 "caption": caption,
                 "variant": style,
                 "title": f"{card_builder.display_name(company)} is hiring",
-                "post_after": (now + timedelta(minutes=SPACING_MIN * slot)).isoformat(),
             })
-            slot += 1
+        per_company.append(comp_entries)
         state["posted_ids"] = list(dict.fromkeys(
             list(posted) + [str(j.get("id")) for j in fresh]))[-8000:]
         state["last_run"] = now.isoformat()
         _save(container, _li_state_blob(company), state)
         notes.append(f"{company}: queued {len(chunks)} cards ({len(new)} jobs)")
+    while any(per_company):
+        for lst in per_company:
+            if lst:
+                e = lst.pop(0)
+                e["post_after"] = (now + timedelta(minutes=SPACING_MIN * slot)).isoformat()
+                slot += 1
+                added.append(e)
     # merge-on-save: re-read so a concurrent drain's queue update isn't clobbered
     queue = _load(container, QUEUE_BLOB, []) + added
     _save(container, QUEUE_BLOB, queue)
@@ -284,8 +295,7 @@ def generate(container, logo_loader=None, companies=None, hours=24):
 
 
 def _in_posting_window(now):
-    mins = now.hour * 60 + now.minute
-    return 11 * 60 + 30 <= mins < 23 * 60      # 7:30a–7p ET (EDT)
+    return True    # 24/7 posting: one card per drain run (6/hour)
 
 
 def drain(container):
