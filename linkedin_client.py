@@ -73,7 +73,27 @@ def _upload_image(token, upload_url, png_bytes):
     r.raise_for_status()
 
 
-def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None):
+def _utf16_len(t):
+    return len(t.encode("utf-16-le")) // 2
+
+
+def _commentary(text, mention=None):
+    """mention = (display_name, organization_urn) -> blue @tag on first occurrence."""
+    body = {"text": text}
+    if mention:
+        name, org = mention
+        idx = text.find(name)
+        if idx >= 0 and org:
+            body["attributes"] = [{
+                "start": _utf16_len(text[:idx]),
+                "length": _utf16_len(name),
+                "value": {"com.linkedin.common.CompanyAttributedEntity":
+                          {"company": org}},
+            }]
+    return body
+
+
+def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None, mention=None):
     """Publish a member post with one image. Returns the share URN."""
     token = token or _token()
     urn = urn or person_urn(token)
@@ -82,7 +102,7 @@ def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None):
     body = {
         "author": urn, "lifecycleState": "PUBLISHED",
         "specificContent": {"com.linkedin.ugc.ShareContent": {
-            "shareCommentary": {"text": text},
+            "shareCommentary": _commentary(text, mention),
             "shareMediaCategory": "IMAGE",
             "media": [{"status": "READY",
                        "description": {"text": title},

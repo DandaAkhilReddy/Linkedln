@@ -15,6 +15,7 @@ import os
 import io
 import re
 import json
+import random
 import base64
 import logging
 import datetime
@@ -39,6 +40,21 @@ MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "2"))
 
 # imported lazily to avoid circular import with function_app
 COMPANIES = None
+
+# Verified LinkedIn organization URNs (blue @mention tags). Only IDs we are
+# sure of — a wrong ID would tag the wrong company; anthropic/xai stay plain.
+ORG_URNS = {
+    "microsoft": "urn:li:organization:1035",
+    "google":    "urn:li:organization:1441",
+    "amazon":    "urn:li:organization:1586",
+    "apple":     "urn:li:organization:162479",
+    "netflix":   "urn:li:organization:165158",
+    "nvidia":    "urn:li:organization:3608",
+    "meta":      "urn:li:organization:10667",
+    "openai":    "urn:li:organization:11130470",
+}
+
+HOOK_VARIANTS = ["salary_hook", "question_hook", "urgency_hook"]
 
 
 def _set_companies(companies):
@@ -147,22 +163,30 @@ def _top_pay(jobs):
     return f"${int(best):,}" if best >= 10000 else None
 
 
-def _caption(company, jobs, part, total):
+def _caption(company, jobs, part, total, style="salary_hook"):
     name = card_builder.display_name(company)
     n = len(jobs)
     top = _top_pay(jobs)
-    if n == 1:
-        j = jobs[0]
-        t = j.get("title") or j.get("name") or "a new role"
+    roles = "1 new role" if n == 1 else f"{n} new roles"
+    if style == "question_hook":
+        hook = f"Want to work at {name}? {roles.capitalize()} just opened 👀"
+        if top:
+            hook += f"\nPay up to {top} 💰"
+    elif style == "urgency_hook":
+        hook = f"🚨 {name} opened {roles} TODAY — early applicants win"
+        if top:
+            hook += f" (up to {top} 💰)"
+    elif n == 1:
+        t = jobs[0].get("title") or jobs[0].get("name") or "a new role"
         hook = f"{name} is hiring: {t}"
         if top:
-            hook += f" — {top} \U0001F4B0"
+            hook += f" — {top} 💰"
     else:
-        hook = f"{name} just posted {n} new roles"
+        hook = f"{name} just posted {roles}"
         if top:
-            hook += f" — pay up to {top} \U0001F4B0"
+            hook += f" — pay up to {top} 💰"
         else:
-            hook += " \U0001F680"
+            hook += " 🚀"
     lines = [hook, "", "Fresh openings \U0001F447", ""]
     for j in jobs[:8]:
         det = j.get("_detail") or {}
@@ -233,11 +257,13 @@ def generate(container, logo_loader=None, companies=None, hours=24):
                                           total=len(chunks), logo_loader=logo_loader)
             card_id = f"{company}_{now:%Y%m%d}_{i+1}"
             container.upload_blob(f"{CARDS_PREFIX}{card_id}.png", png, overwrite=True)
-            caption = _caption(company, chunk, i + 1, len(chunks))
+            style = random.choice(HOOK_VARIANTS)
+            caption = _caption(company, chunk, i + 1, len(chunks), style)
             added.append({
                 "company": company,
                 "card_blob": f"{CARDS_PREFIX}{card_id}.png",
                 "caption": caption,
+                "variant": style,
                 "title": f"{card_builder.display_name(company)} is hiring",
                 "post_after": (now + timedelta(minutes=SPACING_MIN * slot)).isoformat(),
             })
@@ -283,10 +309,23 @@ def drain(container):
             continue
         try:
             png = container.download_blob(item["card_blob"]).readall()
+            mention = None
+            org = ORG_URNS.get(item["company"])
+            if org:
+                mention = (card_builder.display_name(item["company"]), org)
             share = linkedin_client.post_with_image(item["caption"], png,
                                                     title=item["title"],
-                                                    token=token, urn=urn)
+                                                    token=token,
+                                                    mention=mention)
             notes.append(f"posted {item['company']} {share}")
+            try:
+                plog = _load(container, "li_post_log.json", [])
+                plog.append({"ts": now.isoformat(), "company": item["company"],
+                             "variant": item.get("variant", "salary_hook"),
+                             "urn": share})
+                _save(container, "li_post_log.json", plog[-2000:])
+            except Exception:
+                pass
             posted += 1
         except Exception as e:
             item["retries"] = item.get("retries", 0) + 1
