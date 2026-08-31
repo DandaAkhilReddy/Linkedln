@@ -13,6 +13,7 @@ State/queue live in the same `linkedin-posts` blob container as the emailer.
 
 import os
 import io
+import re
 import json
 import base64
 import logging
@@ -130,21 +131,44 @@ def _job_team(company, j):
     return ""
 
 
+def _top_pay(jobs):
+    """Largest salary figure across the chunk, for the hook line."""
+    best = 0
+    for j in jobs:
+        sal = j.get("salary") or (j.get("_detail") or {}).get("salary") or ""
+        for m in re.finditer(r"\$?\s?([\d][\d,]*(?:\.\d+)?)\s*([Kk])?", sal):
+            try:
+                v = float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            if m.group(2):
+                v *= 1000
+            best = max(best, v)
+    return f"${int(best):,}" if best >= 10000 else None
+
+
 def _caption(company, jobs, part, total):
     name = card_builder.display_name(company)
-    date_str = datetime.datetime.now().strftime("%B %d, %Y")
-    tag = f"\U0001F680 {name} is Hiring! | {date_str}"
-    if total > 1:
-        tag += f" (Part {part}/{total})"
-    lines = [tag, "", "Fresh roles posted in the last 24 hours \U0001F447", ""]
+    n = len(jobs)
+    top = _top_pay(jobs)
+    if n == 1:
+        j = jobs[0]
+        t = j.get("title") or j.get("name") or "a new role"
+        hook = f"{name} is hiring: {t}"
+        if top:
+            hook += f" — {top} \U0001F4B0"
+    else:
+        hook = f"{name} just posted {n} new roles"
+        if top:
+            hook += f" — pay up to {top} \U0001F4B0"
+        else:
+            hook += " \U0001F680"
+    lines = [hook, "", "Fresh openings \U0001F447", ""]
     for j in jobs[:8]:
         det = j.get("_detail") or {}
-        title = j.get("title") or j.get("name") or j.get("postingTitle") or "Role"
+        title = j.get("title") or j.get("name") or "Role"
         lines.append(f"\U0001F4BC {title}")
         lines.append(f"\U0001F4CD {_job_loc(j)}")
-        team = _job_team(company, j)
-        if team:
-            lines.append(f"\U0001F3AF {team}")
         sal = j.get("salary") or det.get("salary")
         if sal:
             lines.append(f"\U0001F4B0 {sal}")
@@ -153,14 +177,14 @@ def _caption(company, jobs, part, total):
             lines.append(f"\U0001F517 {url}")
         lines.append("")
     lines += [
-        "\u267B\ufe0f Repost to help someone in your network!",
-        f"\U0001F514 Follow for daily {name} job updates.",
+        "\u267B\ufe0f Repost to help a job seeker in your network.",
+        "\U0001F4AC Which one are you applying to? \U0001F447",
         "",
-        f"#{name}Careers #Hiring #TechJobs #SoftwareEngineering #JobSearch #NowHiring",
+        f"#{name}Careers #Hiring #TechJobs #JobSearch",
     ]
     cap = "\n".join(lines)
-    if len(cap) > 2900:            # LinkedIn hard limit is 3000
-        cap = cap[:2870].rsplit("\n", 1)[0] + "\n\n#Hiring #TechJobs #NowHiring"
+    if len(cap) > 2900:
+        cap = cap[:2870].rsplit("\n", 1)[0] + "\n\n#Hiring #TechJobs"
     return cap
 
 
@@ -187,13 +211,13 @@ def generate(container, logo_loader=None, companies=None, hours=24):
             continue
         posted = set(state.get("posted_ids", []))
         new = [j for j in fresh if str(j.get("id")) not in posted]
-        new = cfg["pipeline"].sort_software_first(new)[:50]
+        new = cfg["pipeline"].sort_software_first(new)[:CARDS_PER_COMPANY * JOBS_PER_CARD]
         if not new:
             state["last_run"] = now.isoformat()
             _save(container, _li_state_blob(company), state)
             notes.append(f"{company}: no new jobs")
             continue
-        chunks = card_builder.split_into(new, CARDS_PER_COMPANY)
+        chunks = [new[i:i + JOBS_PER_CARD] for i in range(0, len(new), JOBS_PER_CARD)]
         for i, chunk in enumerate(chunks):
             # enrich for salary on the card (best-effort, bounded to this chunk)
             for j in chunk:
@@ -230,8 +254,16 @@ def generate(container, logo_loader=None, companies=None, hours=24):
     return notes
 
 
+def _in_posting_window(now):
+    mins = now.hour * 60 + now.minute
+    return 11 * 60 + 30 <= mins < 23 * 60      # 7:30a–7p ET (EDT)
+
+
 def drain(container):
     """Post due queue entries (up to MAX_PER_DRAIN). Returns notes."""
+    now = datetime.datetime.now(timezone.utc)
+    if not _in_posting_window(now):
+        return ["outside posting window (7:30a-7p ET) — holding queue"]
     if _cfg("linkedin_autopost_enabled", "false").lower() != "true":
         return ["autopost disabled"]
     now = datetime.datetime.now(timezone.utc)
