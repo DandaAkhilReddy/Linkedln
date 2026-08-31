@@ -43,7 +43,7 @@ MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "1"))
 COMPANIES = None
 
 # Verified LinkedIn organization URNs (blue @mention tags). Only IDs we are
-# sure of — a wrong ID would tag the wrong company; xai stays plain (login-walled).
+# sure of — a wrong ID would tag the wrong company. All 10 verified.
 ORG_URNS = {
     "microsoft": "urn:li:organization:1035",
     "google":    "urn:li:organization:1441",
@@ -54,6 +54,9 @@ ORG_URNS = {
     "meta":      "urn:li:organization:10667",
     "openai":    "urn:li:organization:11130470",
     "anthropic": "urn:li:organization:74126343",
+    # xAI rebranded to SpaceXAI; linkedin.com/company/xai redirects to the
+    # official SpaceXAI page (verified via x.ai + the LinkedIn redirect)
+    "xai":       "urn:li:organization:96151950",
 }
 
 HOOK_VARIANTS = ["salary_hook", "question_hook", "urgency_hook"]
