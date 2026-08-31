@@ -16,6 +16,7 @@ import imaplib
 import smtplib
 import datetime
 from email.mime.text import MIMEText
+from email.header import decode_header
 
 SUBJECT = "LinkedIn Growth Check-in"
 BLOB = "growth_log.json"
@@ -77,6 +78,13 @@ def send_ask(container):
     return ["ask " + _send("\U0001F4C8 " + SUBJECT, body)]
 
 
+def _decode_subj(raw):
+    out = ""
+    for txt, enc in decode_header(raw or ""):
+        out += txt.decode(enc or "utf-8", "ignore") if isinstance(txt, bytes) else txt
+    return out
+
+
 def _top_text(body):
     top_lines = []
     for line in body.splitlines():
@@ -112,11 +120,23 @@ def poll_replies(container):
     try:
         M.login(user, pwd)
         M.select("INBOX")
-        typ, data = M.search(None, "UNSEEN", "SUBJECT", f'"{SUBJECT}"')
-        for num in (data[0] or b"").split():
-            typ, msgdata = M.fetch(num, "(RFC822)")   # fetch marks it seen
+        # Self-sent replies arrive pre-SEEN, so track a UID cursor instead
+        try:
+            mstate = json.loads(container.download_blob("li_mail_state.json").readall())
+        except Exception:
+            mstate = {"last_uid": 0}
+        last_uid = int(mstate.get("last_uid", 0))
+        typ, data = M.uid("search", None, "SUBJECT", f'"{SUBJECT}"')
+        uids = sorted(int(u) for u in (data[0] or b"").split())
+        fresh_uids = [u for u in uids if u > last_uid]
+        if uids:
+            mstate["last_uid"] = max(uids)
+            container.upload_blob("li_mail_state.json", json.dumps(mstate),
+                                  overwrite=True)
+        for num in fresh_uids:
+            typ, msgdata = M.uid("fetch", str(num), "(RFC822)")
             m = email.message_from_bytes(msgdata[0][1])
-            subj = m.get("Subject", "")
+            subj = _decode_subj(m.get("Subject", ""))
             low = subj.lower()
             if "re:" not in low and "jobs bot" not in low:
                 continue        # our own ask (self-delivered), not a reply
