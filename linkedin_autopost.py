@@ -43,7 +43,7 @@ MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "1"))
 COMPANIES = None
 
 # Verified LinkedIn organization URNs (blue @mention tags). Only IDs we are
-# sure of — a wrong ID would tag the wrong company; anthropic/xai stay plain.
+# sure of — a wrong ID would tag the wrong company; xai stays plain (login-walled).
 ORG_URNS = {
     "microsoft": "urn:li:organization:1035",
     "google":    "urn:li:organization:1441",
@@ -53,6 +53,7 @@ ORG_URNS = {
     "nvidia":    "urn:li:organization:3608",
     "meta":      "urn:li:organization:10667",
     "openai":    "urn:li:organization:11130470",
+    "anthropic": "urn:li:organization:74126343",
 }
 
 HOOK_VARIANTS = ["salary_hook", "question_hook", "urgency_hook"]

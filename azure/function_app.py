@@ -70,9 +70,10 @@ COMPANIES = {
 }
 
 # Split across invocations so each stays under the 10-minute function timeout
-GROUP_A = ["microsoft", "apple", "google"]
-GROUP_B = ["amazon", "nvidia", "meta"]
-GROUP_C = ["openai", "anthropic", "netflix", "xai"]
+# Favorites first: group A's cards land at the front of the day's queue
+GROUP_A = ["anthropic", "openai", "microsoft", "apple"]
+GROUP_B = ["google", "amazon", "nvidia"]
+GROUP_C = ["meta", "netflix", "xai"]
 
 
 def _container():
