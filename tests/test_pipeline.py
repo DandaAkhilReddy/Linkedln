@@ -364,3 +364,12 @@ def test_meta_seed_first_run(monkeypatch):
     monkeypatch.setattr(mp, "get_jobs", lambda cutoff=None: list(jobs2))
     notes2 = fa.batch_run("meta", "t", "x")
     assert "1 jobs" in notes2[0]
+
+
+def test_autopost_module_constants_exist():
+    """Regression: a silent patch once dropped JOBS_PER_CARD and every
+    generate crashed with NameError for a full day."""
+    import linkedin_autopost as la
+    assert isinstance(la.CARDS_PER_COMPANY, int)
+    assert isinstance(la.JOBS_PER_CARD, int)
+    assert la.HOOK_VARIANTS and la.ORG_URNS.get("microsoft", "").startswith("urn:li:organization:")

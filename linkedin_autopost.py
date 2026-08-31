@@ -35,6 +35,7 @@ def _cfg(key, default):
 QUEUE_BLOB = "li_queue.json"
 CARDS_PREFIX = "li_cards/"
 CARDS_PER_COMPANY = int(os.getenv("LINKEDIN_CARDS_PER_COMPANY", "5"))
+JOBS_PER_CARD = int(os.getenv("LINKEDIN_JOBS_PER_CARD", "4"))
 SPACING_MIN = int(os.getenv("LINKEDIN_SPACING_MIN", "25"))
 MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "2"))
 
