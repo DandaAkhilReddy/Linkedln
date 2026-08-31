@@ -248,8 +248,8 @@ def linkedin_generate_c(timer: func.TimerRequest) -> None:
         logging.error("LI gen C crashed:\n%s", traceback.format_exc())
 
 
-# Mon/Thu 13:00 UTC (9 AM ET) — email the follower-count check-in question
-@app.timer_trigger(schedule="0 0 13 * * 1,4", arg_name="timer", run_on_startup=False)
+# Daily 13:00 UTC (9 AM ET) — email the follower-count check-in question
+@app.timer_trigger(schedule="0 0 13 * * *", arg_name="timer", run_on_startup=False)
 def growth_ask(timer: func.TimerRequest) -> None:
     try:
         logging.info("growth ask: %s", "; ".join(growth_check.send_ask(_container())))
