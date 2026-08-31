@@ -19,7 +19,22 @@ from email.mime.text import MIMEText
 
 SUBJECT = "LinkedIn Growth Check-in"
 BLOB = "growth_log.json"
+CHAT_BLOB = "chat_history.json"
 DEFAULT_GOAL = 200
+
+ALLOWED_ACTIONS = {"linkedin_autopost_enabled", "cards_per_company",
+                   "jobs_per_card", "log_followers"}
+
+
+def _secrets(container):
+    try:
+        return json.loads(container.download_blob("li_secrets.json").readall())
+    except Exception:
+        return {}
+
+
+def _save_secrets(container, sec):
+    container.upload_blob("li_secrets.json", json.dumps(sec), overwrite=True)
 
 
 def _creds():
@@ -62,6 +77,15 @@ def send_ask(container):
     return ["ask " + _send("\U0001F4C8 " + SUBJECT, body)]
 
 
+def _top_text(body):
+    top_lines = []
+    for line in body.splitlines():
+        if line.strip().startswith(">") or re.match(r"^On .{5,80} wrote:", line):
+            break
+        top_lines.append(line)
+    return "\n".join(top_lines)[:1500].strip()
+
+
 def _extract_count(body):
     """First follower-count-looking number in the un-quoted top of a reply."""
     top_lines = []
@@ -93,7 +117,8 @@ def poll_replies(container):
             typ, msgdata = M.fetch(num, "(RFC822)")   # fetch marks it seen
             m = email.message_from_bytes(msgdata[0][1])
             subj = m.get("Subject", "")
-            if "re:" not in subj.lower():
+            low = subj.lower()
+            if "re:" not in low and "jobs bot" not in low:
                 continue        # our own ask (self-delivered), not a reply
             body = ""
             if m.is_multipart():
@@ -103,12 +128,11 @@ def poll_replies(container):
                         break
             else:
                 body = m.get_payload(decode=True).decode(errors="ignore")
+            top = _top_text(body)
             count = _extract_count(body)
-            if count is None or count < 100:
-                notes.append("reply found but no count parsed")
-                _send("Re: " + SUBJECT,
-                      "Couldn't find a number in your reply — send just the "
-                      "count, e.g. 15400.\n— your jobs bot")
+            looks_numeric = count is not None and len(top.strip()) <= 40
+            if not looks_numeric:
+                notes.append(_chat_reply(container, subj, top))
                 continue
             log_ = _load_log(container)
             goal = log_.get("goal_per_day", DEFAULT_GOAL)
@@ -140,3 +164,89 @@ def poll_replies(container):
         except Exception:
             pass
     return notes or ["no new replies"]
+
+
+def _chat_reply(container, subj, user_text):
+    """Free-form email chat via Azure OpenAI; can apply config ACTIONs."""
+    sec = _secrets(container)
+    ep, key = sec.get("aoai_endpoint"), sec.get("aoai_key")
+    dep = sec.get("aoai_deployment", "gpt-4o-mini")
+    reply_subj = subj if subj.lower().startswith("re:") else "Re: " + subj
+    if not (ep and key):
+        _send(reply_subj,
+              "Chat brain isn't connected yet — an Azure OpenAI endpoint/key "
+              "still needs to be added (ask Claude on the laptop).\n— your jobs bot")
+        return "chat requested but AOAI not configured"
+    import llm_chat
+    log_ = _load_log(container)
+    tail = log_["entries"][-5:]
+    try:
+        qlen = len(json.loads(container.download_blob("li_queue.json").readall()))
+    except Exception:
+        qlen = 0
+    cfg_now = {k: sec.get(k) for k in ("linkedin_autopost_enabled",
+                                       "cards_per_company", "jobs_per_card")}
+    system = (
+        "You are the email assistant for Reddy's LinkedIn jobs auto-poster "
+        "(Azure Functions; posts new big-tech job openings to his personal "
+        "LinkedIn with logo cards, salary hooks, @company tags; companies: "
+        "Microsoft, Apple, Google, Amazon, NVIDIA, Meta, OpenAI, Anthropic, "
+        "Netflix, xAI; window 7:30am-7pm ET; hooks rotate salary/question/"
+        "urgency). Answer his email briefly and concretely (plain text, no "
+        "markdown). Growth goal: 200 followers/day. Recent growth log: "
+        + json.dumps(tail) + ". Cards queued right now: " + str(qlen) +
+        ". Current config overrides: " + json.dumps(cfg_now) +
+        ". If (and only if) he asks for a settings change or reports a "
+        "follower count, append a final line exactly like: "
+        "ACTION: {\"cards_per_company\": 4} using only these keys: "
+        "linkedin_autopost_enabled ('true'/'false'), cards_per_company (1-5), "
+        "jobs_per_card (2-6), log_followers (integer). Never invent other keys. "
+        "Do not promise more than 5 posts/company (LinkedIn suppresses more).")
+    try:
+        hist = json.loads(container.download_blob(CHAT_BLOB).readall())
+    except Exception:
+        hist = []
+    msgs = ([{"role": "system", "content": system}] + hist[-10:] +
+            [{"role": "user", "content": user_text}])
+    try:
+        out = llm_chat.chat(ep, key, dep, msgs)
+    except Exception as e:
+        _send(reply_subj, f"Chat brain error: {e}\n— your jobs bot")
+        return f"chat error {e}"
+    applied = []
+    body_out = []
+    for line in out.splitlines():
+        if line.strip().startswith("ACTION:"):
+            try:
+                act = json.loads(line.split("ACTION:", 1)[1].strip())
+            except Exception:
+                continue
+            sec2 = _secrets(container)
+            for k, v in act.items():
+                if k not in ALLOWED_ACTIONS:
+                    continue
+                if k == "log_followers":
+                    log2 = _load_log(container)
+                    log2["entries"].append({"date": datetime.date.today().isoformat(),
+                                            "followers": int(v), "note": "via chat"})
+                    container.upload_blob(BLOB, json.dumps(log2, indent=1),
+                                          overwrite=True)
+                    applied.append(f"logged {int(v):,} followers")
+                elif k == "cards_per_company":
+                    sec2[k] = max(1, min(5, int(v))); applied.append(f"{k}={sec2[k]}")
+                elif k == "jobs_per_card":
+                    sec2[k] = max(2, min(6, int(v))); applied.append(f"{k}={sec2[k]}")
+                else:
+                    sec2[k] = str(v).lower(); applied.append(f"{k}={sec2[k]}")
+            _save_secrets(container, sec2)
+        else:
+            body_out.append(line)
+    answer = "\n".join(body_out).strip()
+    if applied:
+        answer += "\n\n\u2705 Applied: " + ", ".join(applied)
+    answer += "\n\n\u2014 your jobs bot"
+    hist += [{"role": "user", "content": user_text[:800]},
+             {"role": "assistant", "content": answer[:800]}]
+    container.upload_blob(CHAT_BLOB, json.dumps(hist[-16:]), overwrite=True)
+    _send(reply_subj, answer)
+    return "chat answered"

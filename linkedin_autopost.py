@@ -235,13 +235,15 @@ def generate(container, logo_loader=None, companies=None, hours=24):
             continue
         posted = set(state.get("posted_ids", []))
         new = [j for j in fresh if str(j.get("id")) not in posted]
-        new = cfg["pipeline"].sort_software_first(new)[:CARDS_PER_COMPANY * JOBS_PER_CARD]
+        cards_cap = max(1, min(5, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
+        jpc = max(2, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
+        new = cfg["pipeline"].sort_software_first(new)[:cards_cap * jpc]
         if not new:
             state["last_run"] = now.isoformat()
             _save(container, _li_state_blob(company), state)
             notes.append(f"{company}: no new jobs")
             continue
-        chunks = [new[i:i + JOBS_PER_CARD] for i in range(0, len(new), JOBS_PER_CARD)]
+        chunks = [new[i:i + jpc] for i in range(0, len(new), jpc)]
         for i, chunk in enumerate(chunks):
             # enrich for salary on the card (best-effort, bounded to this chunk)
             for j in chunk:

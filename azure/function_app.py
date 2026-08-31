@@ -257,8 +257,8 @@ def growth_ask(timer: func.TimerRequest) -> None:
         logging.error("growth ask crashed:\n%s", traceback.format_exc())
 
 
-# every 2h at :30 — read email replies, log count, send analysis back
-@app.timer_trigger(schedule="0 30 */2 * * *", arg_name="timer", run_on_startup=False)
+# every 20 min — read email replies: log counts, answer chat, apply ACTIONs
+@app.timer_trigger(schedule="0 */20 * * * *", arg_name="timer", run_on_startup=False)
 def growth_poll(timer: func.TimerRequest) -> None:
     try:
         logging.info("growth poll: %s", "; ".join(growth_check.poll_replies(_container())))
