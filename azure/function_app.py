@@ -34,6 +34,7 @@ import anthropic_jobs_pipeline
 import netflix_jobs_pipeline
 import xai_jobs_pipeline
 import linkedin_autopost
+import growth_check
 import card_builder
 
 app = func.FunctionApp()
@@ -245,6 +246,38 @@ def linkedin_generate_c(timer: func.TimerRequest) -> None:
         logging.info("LI gen C: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_C)))
     except Exception:
         logging.error("LI gen C crashed:\n%s", traceback.format_exc())
+
+
+# Mon/Thu 13:00 UTC (9 AM ET) — email the follower-count check-in question
+@app.timer_trigger(schedule="0 0 13 * * 1,4", arg_name="timer", run_on_startup=False)
+def growth_ask(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("growth ask: %s", "; ".join(growth_check.send_ask(_container())))
+    except Exception:
+        logging.error("growth ask crashed:\n%s", traceback.format_exc())
+
+
+# every 2h at :30 — read email replies, log count, send analysis back
+@app.timer_trigger(schedule="0 30 */2 * * *", arg_name="timer", run_on_startup=False)
+def growth_poll(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("growth poll: %s", "; ".join(growth_check.poll_replies(_container())))
+    except Exception:
+        logging.error("growth poll crashed:\n%s", traceback.format_exc())
+
+
+@app.route(route="growth_run", auth_level=func.AuthLevel.FUNCTION)
+def growth_run(req: func.HttpRequest) -> func.HttpResponse:
+    """Manual: ?action=ask | poll"""
+    try:
+        act = req.params.get("action", "poll")
+        out = (growth_check.send_ask(_container()) if act == "ask"
+               else growth_check.poll_replies(_container()))
+        return func.HttpResponse("NOTES: " + "; ".join(out), status_code=200,
+                                 mimetype="text/plain; charset=utf-8")
+    except Exception:
+        return func.HttpResponse("CRASH:\n" + traceback.format_exc(), status_code=500,
+                                 mimetype="text/plain; charset=utf-8")
 
 
 # every 15 min — drip-post any due cards

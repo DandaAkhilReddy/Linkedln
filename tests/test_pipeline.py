@@ -153,7 +153,7 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 4
+    assert src.count("timer_trigger") == 6   # 3 gen + drain + growth ask/poll
     assert '"0 0 12 * * *"' in src and '"0 20 12 * * *"' in src and '"0 30 12 * * *"' in src
     assert '"0 10/15 * * * *"' in src          # drain offset from generates
     assert '"0 0 11 * * *"' not in src         # no email timers
