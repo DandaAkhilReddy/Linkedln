@@ -33,7 +33,7 @@ Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
 
 ## Run it
 
-**Azure Functions (current):** zip the repo root (`function_app.py`, `host.json`, modules, `requirements.txt`) → Kudu zipdeploy. App settings: `AzureWebJobsStorage`, `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO`. Secrets/config live in blob `linkedin-posts/li_secrets.json`.
+**Azure Functions (current):** **push to `main` deploys automatically** (`.github/workflows/deploy.yml`: tests → `Azure/functions-action` with the publish-profile secret → `/health` smoke test). Manual alternative: zip the repo root → Kudu zipdeploy. App settings: `AzureWebJobsStorage`, `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO`. Secrets/config live in blob `linkedin-posts/li_secrets.json`.
 
 **Railway / Docker / anywhere:** see [docs/MIGRATION.md](docs/MIGRATION.md); module/function/data-structure map in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Short version:
 

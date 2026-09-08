@@ -1,0 +1,38 @@
+name: Deploy to Azure Functions
+
+# Push to main -> tests -> deploy. No laptop, no device codes.
+on:
+  push:
+    branches: [main]
+    paths: ['**.py', 'host.json', 'requirements.txt', '.funcignore', '.github/workflows/deploy.yml']
+  workflow_dispatch: {}
+
+concurrency: deploy-prod
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Tests
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest tests/ -q
+      - name: Deploy (remote build)
+        uses: Azure/functions-action@v1
+        with:
+          app-name: func-linkedin-jobs-26418
+          package: '.'
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
+      - name: Smoke-test /health
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+        run: |
+          sleep 60
+          curl -s -o body.json -w 'HTTP %{http_code}\n' --max-time 120 "$HEALTH_URL" || true
+          head -c 400 body.json || true
