@@ -43,7 +43,7 @@ function and a `detail_lookup(id)` function for a board, and it returns a
 ## 3. Modules and their functions
 
 ### Core
-- **jobs.py** — `posts_store()`, `logo_loader(company)`, `generate(companies|group|None, hours)`, `drain()`, `growth_ask()`, `growth_poll()`, `email_batch(companies, hours)`, `test_card(company)`, `run(name)`; constant `SCHEDULE` (list of `(name, cron, fn)`).
+- **jobs.py** — `posts_store()`, `logo_loader(company)`, `generate(companies|group|None, hours)`, `ensure_queue()`, `drain()`, `heal()`, `health()`, `health_report()`, `growth_ask()`, `growth_poll()`, `daily_poll()`, `daily_roundup()`, `strategy_summary()`, `email_batch(companies, hours)`, `test_card(company)`, `run(name)`; constant `SCHEDULE` (list of `(name, cron, fn)`).
 - **companies.py** — no functions; the `COMPANIES` registry and `GROUP_A..E` / `GROUPS`.
 - **storage.py** — `backend()`, `get_store(container)`; classes `FileStore`, `_Downloaded`, `_Entry`.
 
@@ -53,11 +53,13 @@ function and a `detail_lookup(id)` function for a board, and it returns a
 - **linkedin_client.py** — `_blob_secrets()`, `_token()`, `person_urn(token)`, `_register_image()`, `_upload_image()`, `_utf16_len(text)`, `_commentary(text, mention)` (builds the @mention annotation), **`post_with_image(text, png, title, token, urn, mention)`**, `post_text()`, `token_valid()`.
 
 ### Growth loop
-- **growth_check.py** — `_secrets`, `_save_secrets`, `_creds`, `_send(subject, body)`, `_load_log`, `send_ask(store)`, `_decode_subj`, `_top_text`, `_extract_count(body)`, **`poll_replies(store)`** (IMAP UID cursor → number path or chat path), `_chat_reply(store, subj, text)` (LLM + guarded `ACTION:` application).
+- **growth_check.py** — `_secrets`, `_save_secrets`, `_creds`, `_send(subject, body)`, `_load_log`, `send_ask(store)`, `_decode_subj`, `_top_text`, `_extract_count(body)`, **`log_count(store, count, note)`** (one entry per day, credits the strategy arms, returns the analysis text), **`poll_replies(store)`** (IMAP UID cursor → number path or chat path), `_chat_reply(store, subj, text)` (LLM + guarded `ACTION:` application; keys: `linkedin_autopost_enabled`, `cards_per_company`, `jobs_per_card`, `log_followers`, `strategy_arm`).
+- **growth_posts.py** — the two native high-reach formats, via the versioned Posts API (`/rest/posts`, `LinkedIn-Version`): little-text-format helpers `ltf`, `ltf_mention`, `ltf_tag`; `post_poll(question, options, commentary, token, author)`, `post_document(pdf, title, commentary, token, author)` (initializeUpload → PUT → post); job facts `record_facts(store, company, jobs, job_loc, job_url)` (side effect of generate → `li_jobfacts.json`), `top_paid(store, days, n, per_company)`, `company_tops(store)`; carousel rendering `build_roundup_pdf(items, logo_loader, date_str)` (Pillow multi-page PDF, 1080×1350, bundled Poppins fonts); the daily jobs **`daily_poll(store)`** and **`daily_roundup(store, logo_loader)`** (both log to `li_post_log.json` with variant `poll` / `carousel`, respect the daily cap, once per day).
+- **strategy.py** — the strategy bandit: `ARMS` (`volume`: 1/10 min 24/7; `prime`: 1/30 min 7am–9pm ET), `arm_for(store, day)` (3-day blocks; explore each arm, then exploit the best followers/day, re-testing the runner-up every 4th block; `li_secrets.strategy_arm` overrides), `policy(store, now)` (settings for right now + logs today's arm), `should_post(store, now, last_post_ts)` (window + spacing gate used by `drain`), `expected(policy)` (posts/day + max gap for the health thresholds), `credit(store, prev_date, prev_count, date, count)` (splits a reported gain over the days in between), `summary(store)` (scoreboard text for the emails).
 - **llm_chat.py** — `chat(endpoint, key, deployment, messages)` (classic Azure OpenAI or AI-Foundry `/openai/v1`).
 
 ### Hosts / ops
-- **function_app.py** — 8 timer functions (`linkedin_generate_a..e`, `linkedin_drain`, `growth_ask`, `growth_poll`), 4 HTTP routes (`linkedin_run`, `growth_run`, `run_now`, `test_email`), helpers `_ncron`, `_text`.
+- **function_app.py** — 11 timer functions (`linkedin_generate_a..e`, `linkedin_drain`, `growth_ask`, `growth_poll`, `health_report`, `daily_poll`, `daily_roundup`), 5 HTTP routes (`health`, `linkedin_run`, `growth_run?action=ask|poll|poll_post|carousel|strategy`, `run_now`, `test_email`), helpers `_ncron`, `_text`.
 - **worker.py** — `_field_matches`, `cron_matches(cron5, dt)`, `_serve_health`, `scheduler_loop()`, `status()`; class `_Health` (HTTP handler). CLI: `run <job>`, `generate <group> [hours]`, `status`.
 - **emailer.py** — `_load_state`, `_save_state`, `send_email`, `batch_run(store, company, label, suffix, lookback_hours)`.
 - **migrate_storage.py** — `azure_store`, `copy(src, dst)`, `main()`.
@@ -91,7 +93,7 @@ Everything else is functions + dicts on purpose: state must be serializable, and
 **Queue entry** — `li_queue.json` is a list of these:
 ```json
 {"company": "amd", "card_blob": "li_cards/amd_logo.png", "caption": "…",
- "variant": "salary_hook|question_hook|urgency_hook",
+ "variant": "salary_hook|question_hook|grab_hook",
  "title": "AMD is hiring", "created": "<iso>", "post_after": "<iso>", "retries": 0}
 ```
 `drain()` posts the first entry whose `post_after ≤ now`, at most `MAX_PER_DRAIN` per run, under `DAILY_CAP`, dropping entries older than `STALE_HOURS`.
@@ -102,9 +104,13 @@ Everything else is functions + dicts on purpose: state must be serializable, and
 
 **Secrets / config** — `li_secrets.json`: `access_token`, `person_urn`, `aoai_endpoint|key|deployment`, `linkedin_autopost_enabled`, `cards_per_company`, `jobs_per_card`. Read by `_cfg()`; the email chat's `ACTION:` lines write the last three.
 
-**Post log** — `li_post_log.json`: `[{"ts", "company", "variant", "urn"}]` — the A/B dataset for the hook-style experiment and the source of the daily cap count.
+**Post log** — `li_post_log.json`: `[{"ts", "company", "variant", "urn"}]` — variants are the three hooks plus `poll` and `carousel`; the A/B dataset, the daily-cap count, and the spacing clock for `drain`.
 
-**Growth log** — `growth_log.json`: `{"goal_per_day": 200, "entries": [{"date", "followers", "note"}]}`.
+**Growth log** — `growth_log.json`: `{"goal_per_day": 200, "entries": [{"date", "followers", "note"}]}` (one entry per day).
+
+**Job facts** — `li_jobfacts.json`: `[{"ts", "company", "title", "loc", "salary", "top", "url"}]` for every role with a pay range seen by `generate()` (14-day window). Feeds the carousel (`top_paid`) and the poll numbers (`company_tops`).
+
+**Strategy state** — `li_strategy.json`: `{"blocks": {"<block#>": arm}, "days": {"<date>": arm}, "stats": {arm: {"days", "gained"}}, "credits": [...]}`. `blocks` freezes each 3-day block's decision; `stats` is what the bandit ranks on.
 
 **Registry** — `COMPANIES[name] = {"pipeline": module, "state": blob, "prefix": str, "subject": str, "seed_first_run": bool}`; `GROUPS = {"a": [...], … "e": [...]}`.
 

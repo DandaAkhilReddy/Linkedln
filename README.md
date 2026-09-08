@@ -10,6 +10,21 @@ from your phone (an LLM reads it and applies safe config changes).
 Companies: Microsoft, Apple, Google, Amazon, NVIDIA, Meta, OpenAI, Anthropic,
 Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
 
+## Growth engine (goal: +200 followers/day)
+
+Every post carries a **follow CTA** and a verified **@company tag**. On top of the
+job cards, two native high-reach formats go out daily through the versioned
+Posts API: a **poll** at 8:32 AM ET (company-vs-company with real pay numbers,
+alternating with career questions) and a **PDF carousel** at 12:12 PM ET ("10
+highest-paying tech jobs posted this week", built from the pay ranges the
+generator saw). Neither contains an outbound link.
+
+Strategies are tested as **arms** in 3-day blocks (`strategy.py`): `volume`
+(1 post / 10 min, 24/7) vs `prime` (1 post / 30 min, 7am–9pm ET). The follower
+count you reply with each morning is credited to the arm that was active, and
+after both arms have data the bandit keeps the better one (re-testing the other
+every 4th block). Reply `switch to prime` / `back to volume` / `auto` to steer.
+
 ## How it works
 
 ```
@@ -29,7 +44,7 @@ Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
 - **Portable core**: `jobs.py` (entry points + `SCHEDULE`), `storage.py` (Azure Blob *or* local files, same API), `companies.py` (registry).
 - **Host adapters**: `function_app.py` (Azure Functions, current production) and `worker.py` (Railway / Docker / any VM). Both run the same `SCHEDULE`.
 - **Content**: `card_builder.py` (logo card), `linkedin_autopost.py` (queue, captions, A/B hook variants, daily cap 145 = LinkedIn's limit), `linkedin_client.py` (API).
-- **Growth loop**: `growth_check.py` + `llm_chat.py`.
+- **Growth loop**: `growth_check.py` (email check-in + chat) + `growth_posts.py` (poll + carousel) + `strategy.py` (arms + bandit) + `llm_chat.py`.
 
 ## Run it
 
@@ -45,7 +60,7 @@ python worker.py                # scheduler + /health on $PORT
 
 **Manual controls** (any host): `python worker.py run drain`, `python worker.py generate a 48`, `python worker.py status`. On Azure the same actions are HTTP routes (`linkedin_run`, `growth_run`).
 
-**Steer from your phone:** reply to the daily "LinkedIn Growth Check-in" email with a number (logged + analysed) or a sentence ("pause posting", "make it 5 per company", "how's the queue?") — answered within 20 minutes, changes applied.
+**Steer from your phone:** reply to the daily "LinkedIn Growth Check-in" email with a number (logged, credited to the active strategy, analysed) or a sentence ("pause posting", "make it 5 per company", "switch to prime", "how's the queue?") — answered within 20 minutes, changes applied.
 
 ## Fallbacks & watchdog ("posting is mandatory")
 
@@ -69,7 +84,7 @@ python worker.py                # scheduler + /health on $PORT
 
 ```bash
 pip install -r requirements.txt pytest
-python -m pytest tests/ -v      # 37 tests: parsers, dedup, schedule parity, storage, cron
+python -m pytest tests/ -v      # 49 tests: parsers, dedup, schedule parity, storage, cron, strategy, LTF
 ```
 
 ## Notes

@@ -24,7 +24,7 @@ CHAT_BLOB = "chat_history.json"
 DEFAULT_GOAL = 200
 
 ALLOWED_ACTIONS = {"linkedin_autopost_enabled", "cards_per_company",
-                   "jobs_per_card", "log_followers"}
+                   "jobs_per_card", "log_followers", "strategy_arm"}
 
 
 def _secrets(container):
@@ -66,15 +66,52 @@ def _load_log(container):
         return {"goal_per_day": DEFAULT_GOAL, "entries": []}
 
 
+def _strategy_text(container):
+    try:
+        import strategy
+        return strategy.summary(container)
+    except Exception:
+        return ""
+
+
+def log_count(container, count, note):
+    """Append a follower count (deduped per day), credit the strategy arms
+    with the gain since the previous day's count, return the analysis text."""
+    log_ = _load_log(container)
+    goal = log_.get("goal_per_day", DEFAULT_GOAL)
+    entries = log_["entries"]
+    today = datetime.date.today().isoformat()
+    prev = next((e for e in reversed(entries) if e["date"] != today), None)
+    entries[:] = [e for e in entries if e["date"] != today]     # one entry per day
+    entries.append({"date": today, "followers": int(count), "note": note})
+    container.upload_blob(BLOB, json.dumps(log_, indent=1), overwrite=True)
+    if not prev:
+        return f"Logged {count:,} (baseline)."
+    d0 = datetime.date.fromisoformat(prev["date"])
+    days = max((datetime.date.today() - d0).days, 1)
+    gained = int(count) - prev["followers"]
+    rate = gained / days
+    try:
+        import strategy
+        strategy.credit(container, d0, prev["followers"], datetime.date.today(), int(count))
+    except Exception:
+        pass
+    verdict = ("ON TRACK \U0001F680" if rate >= goal else
+               f"{goal - rate:.0f}/day short of the {goal}/day goal")
+    return (f"Logged {count:,}.\n+{gained:,} in {days} day(s) = {rate:+.0f}/day — {verdict}\n\n"
+            + _strategy_text(container))
+
+
 def send_ask(container):
     log_ = _load_log(container)
     last = log_["entries"][-1] if log_["entries"] else None
     base = (f"Last logged: {last['followers']:,} on {last['date']}."
             if last else "No entries yet — this will be the baseline.")
-    body = ("Reply to this email with just your current LinkedIn follower "
-            f"count (e.g. 15400).\n\n{base}\n\nOptional: mention which hook "
-            "style got the most impressions — salary / question / grab — "
-            "and I'll factor it in.\n\n— your jobs bot")
+    body = ("Reply with just your current LinkedIn follower count (e.g. 15400) — "
+            "one number a day is what trains the strategy picker.\n\n"
+            f"{base}\n\n{_strategy_text(container)}\n\n"
+            "You can also reply in plain words: 'switch to prime', 'back to volume', "
+            "'auto', 'pause', 'status', 'how's the queue?'.\n\n— your jobs bot")
     return ["ask " + _send("\U0001F4C8 " + SUBJECT, body)]
 
 
@@ -154,28 +191,7 @@ def poll_replies(container):
             if not looks_numeric:
                 notes.append(_chat_reply(container, subj, top))
                 continue
-            log_ = _load_log(container)
-            goal = log_.get("goal_per_day", DEFAULT_GOAL)
-            entries = log_["entries"]
-            prev = entries[-1] if entries else None
-            today = datetime.date.today().isoformat()
-            entries.append({"date": today, "followers": count, "note": "via email"})
-            container.upload_blob(BLOB, json.dumps(log_, indent=1), overwrite=True)
-            if prev and prev["date"] != today:
-                d0 = datetime.date.fromisoformat(prev["date"])
-                days = max((datetime.date.today() - d0).days, 1)
-                gained = count - prev["followers"]
-                rate = gained / days
-                verdict = ("ON TRACK \U0001F680" if rate >= goal else
-                           f"below the {goal}/day goal — hold volume, double "
-                           "down on replying to comments within the first hour")
-                analysis = (f"Logged {count:,}.\n"
-                            f"+{gained:,} in {days} day(s) = {rate:.0f}/day. {verdict}\n\n"
-                            "Current strategy: 5 posts/company max, salary/question/"
-                            "grab hooks rotating, @company tags, 7:30a-7p ET.\n"
-                            "— your jobs bot")
-            else:
-                analysis = f"Logged {count:,}. — your jobs bot"
+            analysis = log_count(container, count, "via email") + "\n\n— your jobs bot"
             _send("Re: " + SUBJECT, analysis)
             notes.append(f"logged {count:,}")
     finally:
@@ -206,23 +222,26 @@ def _chat_reply(container, subj, user_text):
     except Exception:
         qlen = 0
     cfg_now = {k: sec.get(k) for k in ("linkedin_autopost_enabled",
-                                       "cards_per_company", "jobs_per_card")}
+                                       "cards_per_company", "jobs_per_card", "strategy_arm")}
     system = (
         "You are the email assistant for Reddy's LinkedIn jobs auto-poster "
-        "(Azure Functions; posts new big-tech job openings to his personal "
-        "LinkedIn with logo cards, salary hooks, @company tags; companies: "
-        "Microsoft, Apple, Google, Amazon, NVIDIA, Meta, OpenAI, Anthropic, "
-        "Netflix, xAI; window 7:30am-7pm ET; hooks rotate salary/question/"
-        "grab). Answer his email briefly and concretely (plain text, no "
-        "markdown). Growth goal: 200 followers/day. Recent growth log: "
+        "(posts new job openings from 17 tech companies — Microsoft, Apple, Google, "
+        "Amazon, NVIDIA, Meta, OpenAI, Anthropic, Netflix, xAI, Databricks, Stripe, "
+        "Scale AI, Ramp, Cursor, AMD, IBM — to his personal LinkedIn with logo cards, "
+        "salary hooks, @company tags, a follow CTA, plus one poll and one PDF "
+        "carousel a day). Strategy arms: 'volume' = 1 post/10 min 24/7; 'prime' = "
+        "1 post/30 min 7am-9pm ET; 'auto' = the bandit picks by followers/day. "
+        "Answer his email briefly and concretely (plain text, no markdown). "
+        "Growth goal: 200 followers/day. Recent growth log: "
         + json.dumps(tail) + ". Cards queued right now: " + str(qlen) +
         ". Current config overrides: " + json.dumps(cfg_now) +
-        ". If (and only if) he asks for a settings change or reports a "
+        ". Strategy status:\n" + _strategy_text(container) +
+        "\nIf (and only if) he asks for a settings change or reports a "
         "follower count, append a final line exactly like: "
         "ACTION: {\"cards_per_company\": 4} using only these keys: "
         "linkedin_autopost_enabled ('true'/'false'), cards_per_company (1-10), "
-        "jobs_per_card (2-6), log_followers (integer). Never invent other keys. "
-        "Posts per company can be 1-10 (user accepts the reach tradeoff at high volume).")
+        "jobs_per_card (2-6), log_followers (integer), strategy_arm "
+        "('volume'/'prime'/'auto'). Never invent other keys.")
     try:
         hist = json.loads(container.download_blob(CHAT_BLOB).readall())
     except Exception:
@@ -247,12 +266,13 @@ def _chat_reply(container, subj, user_text):
                 if k not in ALLOWED_ACTIONS:
                     continue
                 if k == "log_followers":
-                    log2 = _load_log(container)
-                    log2["entries"].append({"date": datetime.date.today().isoformat(),
-                                            "followers": int(v), "note": "via chat"})
-                    container.upload_blob(BLOB, json.dumps(log2, indent=1),
-                                          overwrite=True)
-                    applied.append(f"logged {int(v):,} followers")
+                    applied.append(log_count(container, int(v), "via chat"))
+                elif k == "strategy_arm":
+                    arm = str(v).lower()
+                    if arm == "auto":
+                        sec2.pop("strategy_arm", None); applied.append("strategy=auto")
+                    elif arm in ("volume", "prime"):
+                        sec2["strategy_arm"] = arm; applied.append(f"strategy_arm={arm}")
                 elif k == "cards_per_company":
                     sec2[k] = max(1, min(10, int(v))); applied.append(f"{k}={sec2[k]}")
                 elif k == "jobs_per_card":

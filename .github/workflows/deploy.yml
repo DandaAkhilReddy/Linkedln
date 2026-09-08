@@ -4,7 +4,7 @@ name: Deploy to Azure Functions
 on:
   push:
     branches: [main]
-    paths: ['**.py', 'host.json', 'requirements.txt', '.funcignore', '.github/workflows/deploy.yml']
+    paths: ['**.py', 'host.json', 'requirements.txt', '.funcignore', 'fonts/**', '.github/workflows/deploy.yml']
   workflow_dispatch: {}
 
 concurrency: deploy-prod

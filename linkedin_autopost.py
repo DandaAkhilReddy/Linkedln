@@ -71,6 +71,28 @@ ORG_URNS = {
 
 HOOK_VARIANTS = ["salary_hook", "question_hook", "grab_hook"]
 
+# Every caption ends with an explicit follow ask — reach only becomes
+# followers when the post says what following gets you.
+FOLLOW_CTA = ("\u2795 Follow me \u2014 every new opening at 17 top tech companies, "
+              "with the pay range, every day.")
+
+
+def _caps(container):
+    """(cards per company, jobs per card) = active strategy arm, with the
+    email-chatbot values in li_secrets.json acting as a ceiling / override."""
+    try:
+        import strategy
+        p = strategy.policy(container)
+        cards, jpc = p["cards_per_company"], p["jobs_per_card"]
+    except Exception:
+        cards, jpc = CARDS_PER_COMPANY, JOBS_PER_CARD
+    sec = linkedin_client._blob_secrets()
+    if "cards_per_company" in sec:
+        cards = min(cards, int(sec["cards_per_company"]))
+    if "jobs_per_card" in sec:
+        jpc = int(sec["jobs_per_card"])
+    return max(1, min(10, cards)), max(1, min(6, jpc))
+
 
 def _set_companies(companies):
     global COMPANIES
@@ -172,9 +194,10 @@ def _top_pay(jobs):
                 v = float(m.group(1).replace(",", ""))
             except ValueError:
                 continue
-            if m.group(2):
+            if m.group(2) and v < 10000:       # "250K" scales; "250,000k" (xAI) does not
                 v *= 1000
-            best = max(best, v)
+            if 10000 <= v <= 3_000_000:        # ignore ids / nonsense
+                best = max(best, v)
     return f"${int(best):,}" if best >= 10000 else None
 
 
@@ -221,6 +244,7 @@ def _caption(company, jobs, part, total, style="salary_hook"):
             lines.append(f"\U0001F517 {url}")
         lines.append("")
     lines += [
+        FOLLOW_CTA,
         "\u267B\ufe0f Repost to help a job seeker in your network.",
         "\U0001F4AC Which one are you applying to? \U0001F447",
         "",
@@ -266,8 +290,7 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
         return
     posted = set(state.get("posted_ids", []))
     new = [j for j in fresh if str(j.get("id")) not in posted]
-    cards_cap = max(1, min(10, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
-    jpc = max(1, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
+    cards_cap, jpc = _caps(container)
     new = cfg["pipeline"].sort_software_first(new)[:cards_cap * jpc]
     if not new:
         state["last_run"] = now.isoformat()
@@ -288,6 +311,12 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
                     j["salary"] = det["salary"]
             except Exception:
                 pass
+        try:
+            import growth_posts
+            growth_posts.record_facts(container, company, chunk, _job_loc,
+                                      _job_url)
+        except Exception:
+            pass
         card_blob = f"{CARDS_PREFIX}{company}_logo.png"
         try:
             container.download_blob(card_blob).readall()   # exists — reuse
@@ -331,23 +360,32 @@ def _finish_generate(container, queue, added, per_company, now, slot, notes):
         pass
 
 
-def _in_posting_window(now):
-    return True    # 24/7 posting: one card per drain run (6/hour)
+def _last_post_ts(plog):
+    for p in reversed(plog):
+        try:
+            t = datetime.datetime.fromisoformat(p["ts"])
+            return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+    return None
 
 
 def drain(container):
     """Post due queue entries (up to MAX_PER_DRAIN). Returns notes."""
     now = datetime.datetime.now(timezone.utc)
-    if not _in_posting_window(now):
-        return ["outside posting window (7:30a-7p ET) — holding queue"]
+    plog = _load(container, "li_post_log.json", [])
     # hard daily cap (LinkedIn allows 150 posts/member/day)
+    today = now.date().isoformat()
+    if sum(1 for p in plog if str(p.get("ts", "")).startswith(today)) >= DAILY_CAP:
+        return [f"daily cap {DAILY_CAP} reached — resuming tomorrow"]
+    # posting window + spacing come from the active strategy arm
     try:
-        plog = _load(container, "li_post_log.json", [])
-        today = now.date().isoformat()
-        if sum(1 for p in plog if str(p.get("ts", "")).startswith(today)) >= DAILY_CAP:
-            return [f"daily cap {DAILY_CAP} reached — resuming tomorrow"]
-    except Exception:
-        pass
+        import strategy
+        ok, why = strategy.should_post(container, now, _last_post_ts(plog))
+    except Exception as e:
+        ok, why = True, f"strategy unavailable ({e}); posting"
+    if not ok:
+        return [f"holding queue — {why}"]
     # prune stale cards so a backlog never posts days-old roles
     q0 = _load(container, QUEUE_BLOB, [])
     cutoff_iso = (now - timedelta(hours=STALE_HOURS)).isoformat()

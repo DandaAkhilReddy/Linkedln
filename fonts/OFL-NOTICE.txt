@@ -1,0 +1,2 @@
+Poppins (fonts/Poppins-*.ttf) is licensed under the SIL Open Font License 1.1
+(https://openfontlicense.org). Bundled so carousel rendering is identical on every host.

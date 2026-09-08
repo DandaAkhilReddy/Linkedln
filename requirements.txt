@@ -2,5 +2,6 @@
 requests
 curl_cffi
 pillow
+tzdata
 azure-functions
 azure-storage-blob

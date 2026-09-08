@@ -152,7 +152,7 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 9   # 5 gen + drain + growth ask/poll + health
+    assert src.count("timer_trigger") == 11  # 5 gen + drain + growth ask/poll + health + poll + carousel
     assert '"0 12 * * *"' in src and '"20 12 * * *"' in src and '"30 12 * * *"' in src
     assert '"5-55/10 * * * *"' in src         # drain every 10 min, offset from generates
     assert '"0 11 * * *"' not in src           # no email timers
@@ -494,3 +494,103 @@ def test_hooks_lead_with_salary_and_never_fake_urgency():
         assert "early applicants" not in h_paid.lower() and "early applicants" not in h_unpaid.lower()
         assert "Databricks" in h_paid and "Stripe" in h_unpaid
     assert "grab" in la._caption("databricks", paid, 1, 1, "grab_hook").split("\n")[0].lower()
+
+
+# ---------- growth v2: polls, carousel, strategy bandit ----------
+
+def test_ltf_escapes_reserved_and_builds_mentions():
+    import growth_posts as gp
+    assert gp.ltf("a|b{c}@d[e](f)<g>#h*i_j~k\\l") == "a\\|b\\{c\\}\\@d\\[e\\]\\(f\\)\\<g\\>\\#h\\*i\\_j\\~k\\\\l"
+    assert gp.ltf("$300K — grab it 👇") == "$300K — grab it 👇"          # nothing reserved
+    assert gp.ltf_mention("Scale AI", "urn:li:organization:17998520") == "@[Scale AI](urn:li:organization:17998520)"
+    assert gp.ltf_tag("TechJobs") == "{hashtag|\\#|TechJobs}"
+
+
+def test_caption_has_follow_cta():
+    import linkedin_autopost as la, function_app as fa
+    la._set_companies(fa.COMPANIES)
+    jobs = [{"title": "SWE", "name": "SWE", "locations": ["Austin, TX"], "id": "1",
+             "salary": "$182,000 — $250,208 USD", "_detail": {"url": "https://x/1"}}]
+    cap = la._caption("stripe", jobs, 1, 1, "salary_hook")
+    assert "Follow me" in cap and len(cap) <= 2900
+
+
+def test_record_facts_and_top_paid(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, growth_posts as gp
+    s = storage.get_store("linkedin-posts")
+    mk = lambda i, pay: {"id": str(i), "title": f"Role {i}", "locations": ["Remote"],
+                         "salary": f"${pay:,} - ${pay + 50000:,} USD", "_detail": {"url": f"https://a/{i}"}}
+    gp.record_facts(s, "openai", [mk(1, 300000), mk(2, 400000), mk(3, 500000)], lambda j: "Remote", lambda c, j: "")
+    gp.record_facts(s, "stripe", [mk(4, 450000), {"id": "5", "title": "Unpaid", "_detail": {"url": "https://a/5"}}],
+                    lambda j: "Remote", lambda c, j: "")
+    gp.record_facts(s, "openai", [mk(1, 300000)], lambda j: "Remote", lambda c, j: "")   # duplicate ignored
+    top = gp.top_paid(s, n=10, per_company=2)
+    assert [f["top"] for f in top] == [550000, 500000, 450000]        # max 2 per company, unpaid dropped
+    assert gp.company_tops(s)["stripe"][0] == 500000
+
+
+def test_roundup_pdf_and_poll_commentary(tmp_path):
+    import growth_posts as gp
+    items = [{"company": c, "title": f"Staff Engineer {i}", "loc": "San Francisco, CA",
+              "salary": f"${300 + i * 10}K - ${400 + i * 10}K", "top": (400 + i * 10) * 1000,
+              "url": "https://boards.greenhouse.io/x/1"} for i, c in enumerate(["openai", "anthropic", "stripe", "microsoft", "ibm"])]
+    pdf = gp.build_roundup_pdf(items, date_str="Sep 9, 2026")
+    assert pdf[:4] == b"%PDF" and pdf.count(b"/Type /Page\n") >= 7      # cover + 5 + closing
+    text = gp.poll_commentary("Same offer — which one?", [("openai", 530000, "Research Engineer")])
+    assert "@[OpenAI](urn:li:organization:11130470)" in text and "{hashtag|\\#|TechJobs}" in text
+    assert "Follow me" in text and "\\—" not in text
+
+
+def test_strategy_blocks_credit_and_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, strategy as st, json
+    s = storage.get_store("linkedin-posts")
+    d0 = st.START
+    assert st.arm_for(s, d0) == "volume" and st.arm_for(s, d0 + datetime.timedelta(days=2)) == "volume"
+    assert st.arm_for(s, d0 + datetime.timedelta(days=3)) == "prime"          # next block explores
+    # credit a 3-day gain to the volume block, 3-day gain to prime
+    st.credit(s, d0, 15000, d0 + datetime.timedelta(days=3), 15090)
+    st.credit(s, d0 + datetime.timedelta(days=3), 15090, d0 + datetime.timedelta(days=6), 15300)
+    st2 = st._load(s)
+    assert st2["stats"]["volume"]["days"] == 3 and st2["stats"]["prime"]["gained"] == 210
+    # exploration complete -> block 2 exploits the better arm (prime, 70/day vs 30/day)
+    assert st.arm_for(s, d0 + datetime.timedelta(days=6)) == "prime"
+    assert st.arm_for(s, d0 + datetime.timedelta(days=9)) == "volume"         # every 4th block re-tests runner-up
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
+    assert st.arm_for(s, d0 + datetime.timedelta(days=6)) == "volume"         # manual override wins
+    assert "Scoreboard" in st.summary(s)
+
+
+def test_should_post_respects_window_and_spacing(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, strategy as st, json
+    s = storage.get_store("linkedin-posts")
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "prime"}))
+    noon_utc = datetime.datetime(2026, 9, 12, 16, 0, tzinfo=timezone.utc)       # 12:00 ET
+    night_utc = datetime.datetime(2026, 9, 12, 6, 0, tzinfo=timezone.utc)       # 02:00 ET
+    assert st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=31))[0]
+    assert not st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=10))[0]
+    assert not st.should_post(s, night_utc, None)[0]
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
+    assert st.should_post(s, night_utc, night_utc - datetime.timedelta(minutes=10))[0]
+    assert st.expected(st.ARMS["prime"])[0] == 30 and st.expected(st.ARMS["volume"])[0] == 146
+
+
+def test_log_count_dedupes_per_day_and_credits(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, growth_check as gc, json
+    s = storage.get_store("linkedin-posts")
+    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    s.upload_blob("growth_log.json", json.dumps({"goal_per_day": 200, "entries": [{"date": yesterday, "followers": 15400}]}))
+    out = gc.log_count(s, 15450, "test")
+    out2 = gc.log_count(s, 15460, "test")          # same day again -> replaces, no duplicate
+    entries = json.loads(s.download_blob("growth_log.json").readall())["entries"]
+    assert len(entries) == 2 and entries[-1]["followers"] == 15460
+    assert "+50" in out and "/day" in out and "Strategy now" in out2
+
+
+def test_schedule_has_growth_formats():
+    import jobs
+    names = {n for n, _, _ in jobs.SCHEDULE}
+    assert {"daily_poll", "daily_roundup"} <= names

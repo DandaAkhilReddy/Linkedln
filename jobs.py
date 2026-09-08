@@ -17,7 +17,9 @@ import json
 import card_builder
 import linkedin_autopost
 import growth_check
+import growth_posts
 import healthcheck
+import strategy
 import emailer
 from storage import get_store
 from companies import COMPANIES, GROUPS, GROUP_A, GROUP_B, GROUP_C, GROUP_D, GROUP_E
@@ -106,7 +108,7 @@ def health_report():
     return healthcheck.daily_report(posts_store())
 
 
-# ---------- growth loop (email check-in + chat) ----------
+# ---------- growth loop (email check-in + chat + strategy arms) ----------
 
 def growth_ask():
     return growth_check.send_ask(posts_store())
@@ -114,6 +116,26 @@ def growth_ask():
 
 def growth_poll():
     return growth_check.poll_replies(posts_store())
+
+
+def daily_poll():
+    """One LinkedIn poll a day (if the active strategy arm has polls on)."""
+    store = posts_store()
+    if not strategy.policy(store)["poll"]:
+        return ["poll off in this strategy arm"]
+    return growth_posts.daily_poll(store)
+
+
+def daily_roundup():
+    """One PDF carousel a day: highest-paying roles of the week."""
+    store = posts_store()
+    if not strategy.policy(store)["carousel"]:
+        return ["carousel off in this strategy arm"]
+    return growth_posts.daily_roundup(store, logo_loader)
+
+
+def strategy_summary():
+    return strategy.summary(posts_store())
 
 
 # ---------- optional email batches (manual only) ----------
@@ -153,6 +175,8 @@ SCHEDULE = [
     ("growth_ask", "0 13 * * *",      growth_ask),                  # 9 AM ET check-in email
     ("growth_poll","*/20 * * * *",    growth_poll),                 # read replies / chat
     ("health_report", "30 13 * * *",  health_report),               # 9:30 AM ET watchdog email
+    ("daily_poll", "32 12 * * *",     daily_poll),                  # 8:32 AM ET LinkedIn poll
+    ("daily_roundup", "12 16 * * *",  daily_roundup),               # 12:12 PM ET PDF carousel
 ]
 
 

@@ -8,7 +8,7 @@ HTTP (function-key protected):
   linkedin_run?action=drain | heal            (heal = refill queue if empty, then post)
   health                                       JSON status, 503 when something is wrong
   linkedin_run?action=testcard&company=<name>
-  growth_run?action=ask|poll
+  growth_run?action=ask|poll|poll_post|carousel|strategy
   run_now?company=<name>&hours=N        manual email batch (optional feature)
 """
 
@@ -79,6 +79,16 @@ def health_report(timer: func.TimerRequest) -> None:
     jobs.run("health_report")
 
 
+@app.timer_trigger(schedule=_ncron("32 12 * * *"), arg_name="timer", run_on_startup=False)
+def daily_poll(timer: func.TimerRequest) -> None:
+    jobs.run("daily_poll")
+
+
+@app.timer_trigger(schedule=_ncron("12 16 * * *"), arg_name="timer", run_on_startup=False)
+def daily_roundup(timer: func.TimerRequest) -> None:
+    jobs.run("daily_roundup")
+
+
 # ---- manual HTTP routes ----
 
 @app.route(route="health", auth_level=func.AuthLevel.FUNCTION)
@@ -116,7 +126,10 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="growth_run", auth_level=func.AuthLevel.FUNCTION)
 def growth_run(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        out = jobs.growth_ask() if req.params.get("action") == "ask" else jobs.growth_poll()
+        action = req.params.get("action", "poll")
+        out = {"ask": jobs.growth_ask, "poll_post": jobs.daily_poll,
+               "carousel": jobs.daily_roundup,
+               "strategy": lambda: [jobs.strategy_summary()]}.get(action, jobs.growth_poll)()
         return _text("NOTES: " + "; ".join(out))
     except Exception:
         return _text("CRASH:\n" + traceback.format_exc(), 500)

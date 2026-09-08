@@ -99,13 +99,25 @@ def assess(store):
     except Exception:
         token_ok = False
 
+    # thresholds follow the active strategy arm (volume: ~146/day, prime: ~30/day)
+    arm, exp_posts, gap_limit = "volume", 144, MAX_GAP_MIN
+    min_posts = MIN_POSTS_24H
+    try:
+        import strategy
+        p = strategy.policy(store)
+        arm = p["arm"]
+        exp_posts, gap_limit = strategy.expected(p)
+        min_posts = max(6, exp_posts // 2)
+    except Exception:
+        pass
+
     if not enabled:
         issues.append("autopost is DISABLED (linkedin_autopost_enabled=false)")
     else:
-        if posts_24h < MIN_POSTS_24H:
-            issues.append(f"only {posts_24h} posts in 24h (expected ~144)")
-        if max_gap > MAX_GAP_MIN:
-            issues.append(f"largest gap between posts: {max_gap} min (limit {MAX_GAP_MIN})")
+        if posts_24h < min_posts:
+            issues.append(f"only {posts_24h} posts in 24h (expected ~{exp_posts} in '{arm}' mode)")
+        if max_gap > gap_limit:
+            issues.append(f"largest gap between posts: {max_gap} min (limit {gap_limit} in '{arm}' mode)")
     if not queue:
         issues.append("queue is EMPTY")
     if last_gen is None or now - last_gen > timedelta(hours=GENERATE_MAX_AGE_H):
@@ -125,6 +137,8 @@ def assess(store):
         "last_post": recent[-1].isoformat() if recent else None,
         "token_ok": token_ok,
         "enabled": enabled,
+        "strategy": arm,
+        "expected_posts": exp_posts,
         "issues": issues,
     }
 
@@ -149,8 +163,13 @@ def alert(store, subject, body):
 def daily_report(store):
     r = assess(store)
     ok = r["status"] == "ok"
-    head = ("✅ All good — posting every 10 minutes." if ok else
+    head = (f"✅ All good — posting on schedule ('{r.get('strategy')}' mode, ~{r.get('expected_posts')}/day)." if ok else
             "⚠️ PROBLEMS FOUND:\n  - " + "\n  - ".join(r["issues"]))
+    try:
+        import strategy
+        strat = strategy.summary(store)
+    except Exception:
+        strat = ""
     body = (f"{head}\n\n"
             f"Posts in last 24h: {r['posts_24h']}\n"
             f"Largest gap between posts: {r['max_gap_min']} min\n"
@@ -158,6 +177,7 @@ def daily_report(store):
             f"Last generate: {r['last_generate'] or 'never'}\n"
             f"Last post: {r['last_post'] or 'never'}\n"
             f"Token valid: {r['token_ok']}\n\n"
+            + (strat + "\n\n" if strat else "")
             + ("" if ok else "Self-heal runs automatically every 10 min (refill + retry). "
                "If this persists, reply 'status' to the check-in email or open the laptop.\n\n")
             + "— your jobs bot")
