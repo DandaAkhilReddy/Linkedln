@@ -73,7 +73,7 @@ def send_ask(container):
             if last else "No entries yet — this will be the baseline.")
     body = ("Reply to this email with just your current LinkedIn follower "
             f"count (e.g. 15400).\n\n{base}\n\nOptional: mention which hook "
-            "style got the most impressions — salary / question / urgency — "
+            "style got the most impressions — salary / question / grab — "
             "and I'll factor it in.\n\n— your jobs bot")
     return ["ask " + _send("\U0001F4C8 " + SUBJECT, body)]
 
@@ -172,7 +172,7 @@ def poll_replies(container):
                 analysis = (f"Logged {count:,}.\n"
                             f"+{gained:,} in {days} day(s) = {rate:.0f}/day. {verdict}\n\n"
                             "Current strategy: 5 posts/company max, salary/question/"
-                            "urgency hooks rotating, @company tags, 7:30a-7p ET.\n"
+                            "grab hooks rotating, @company tags, 7:30a-7p ET.\n"
                             "— your jobs bot")
             else:
                 analysis = f"Logged {count:,}. — your jobs bot"
@@ -213,7 +213,7 @@ def _chat_reply(container, subj, user_text):
         "LinkedIn with logo cards, salary hooks, @company tags; companies: "
         "Microsoft, Apple, Google, Amazon, NVIDIA, Meta, OpenAI, Anthropic, "
         "Netflix, xAI; window 7:30am-7pm ET; hooks rotate salary/question/"
-        "urgency). Answer his email briefly and concretely (plain text, no "
+        "grab). Answer his email briefly and concretely (plain text, no "
         "markdown). Growth goal: 200 followers/day. Recent growth log: "
         + json.dumps(tail) + ". Cards queued right now: " + str(qlen) +
         ". Current config overrides: " + json.dumps(cfg_now) +

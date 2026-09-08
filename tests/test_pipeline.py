@@ -479,3 +479,18 @@ def test_drain_refills_when_queue_empty(tmp_path, monkeypatch):
 def test_schedule_has_health_job():
     import jobs
     assert "health_report" in {n for n, _, _ in jobs.SCHEDULE}
+
+
+def test_hooks_lead_with_salary_and_never_fake_urgency():
+    import linkedin_autopost as la, function_app as fa
+    la._set_companies(fa.COMPANIES)
+    paid = [{"title": "SWE", "name": "SWE", "locations": ["Austin, TX"], "salary": "$182,000 — $250,208 USD",
+             "id": "1", "_detail": {"salary": "$182,000 — $250,208 USD", "url": "https://x/1"}}]
+    unpaid = [{"title": "SWE", "name": "SWE", "locations": ["Bucharest"], "id": "2", "_detail": {"url": "https://x/2"}}]
+    for style in la.HOOK_VARIANTS:
+        h_paid = la._caption("databricks", paid, 1, 1, style).split("\n")[0]
+        h_unpaid = la._caption("stripe", unpaid, 1, 1, style).split("\n")[0]
+        assert "$" in h_paid, (style, h_paid)
+        assert "early applicants" not in h_paid.lower() and "early applicants" not in h_unpaid.lower()
+        assert "Databricks" in h_paid and "Stripe" in h_unpaid
+    assert "grab" in la._caption("databricks", paid, 1, 1, "grab_hook").split("\n")[0].lower()

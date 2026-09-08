@@ -69,7 +69,7 @@ ORG_URNS = {
     "cursor":     "urn:li:organization:105614038",   # linkedin.com/company/cursorai (from cursor.com footer)
 }
 
-HOOK_VARIANTS = ["salary_hook", "question_hook", "urgency_hook"]
+HOOK_VARIANTS = ["salary_hook", "question_hook", "grab_hook"]
 
 
 def _set_companies(companies):
@@ -183,25 +183,30 @@ def _caption(company, jobs, part, total, style="salary_hook"):
     n = len(jobs)
     top = _top_pay(jobs)
     roles = "1 new role" if n == 1 else f"{n} new roles"
+    # exact range string of the best-paid job (used by single-job / grab hooks)
+    best_range = ""
+    if top:
+        for jb in jobs:
+            sal = jb.get("salary") or (jb.get("_detail") or {}).get("salary") or ""
+            if top.replace("$", "").replace(",", "") in sal.replace(",", ""):
+                best_range = sal.replace(" per year", "").replace(" USD", "").strip()
+                break
+    # Money leads every hook when we have it; no fake urgency when we don't.
     if style == "question_hook":
-        hook = f"Want to work at {name}? {roles.capitalize()} just opened 👀"
-        if top:
-            hook += f"\nPay up to {top} 💰"
-    elif style == "urgency_hook":
-        hook = f"🚨 {name} opened {roles} TODAY — early applicants win"
-        if top:
-            hook += f" (up to {top} 💰)"
+        hook = (f"Want to earn up to {top} at {name}? {roles.capitalize()} just opened \U0001F440" if top
+                else f"Want to work at {name}? {roles.capitalize()} just opened \U0001F440")
+    elif style == "grab_hook":
+        if top and n == 1 and best_range:
+            hook = f"\U0001F4B0 {best_range} at {name} — grab this role before it's gone"
+        elif top:
+            hook = f"\U0001F4B0 Up to {top} at {name} — {roles}, grab yours before they're gone"
+        else:
+            hook = f"{name} is hiring — {roles}, grab yours before they're gone \U0001F680"
     elif n == 1:
         t = jobs[0].get("title") or jobs[0].get("name") or "a new role"
-        hook = f"{name} is hiring: {t}"
-        if top:
-            hook += f" — {top} 💰"
+        hook = f"{name} is hiring: {t}" + (f" — {best_range or top} \U0001F4B0" if top else "")
     else:
-        hook = f"{name} just posted {roles}"
-        if top:
-            hook += f" — pay up to {top} 💰"
-        else:
-            hook += " 🚀"
+        hook = f"{name} just posted {roles}" + (f" — pay up to {top} \U0001F4B0" if top else " \U0001F680")
     lines = [hook, "", "Fresh openings \U0001F447", ""]
     for j in jobs[:8]:
         det = j.get("_detail") or {}
