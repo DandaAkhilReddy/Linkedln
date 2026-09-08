@@ -1,0 +1,24 @@
+name: Watchdog
+
+# Independent of Azure: if the function app is down, hung, or reports a
+# posting gap, this run FAILS and GitHub emails the repo owner.
+on:
+  schedule:
+    - cron: '0 14 * * *'   # 10:00 AM ET (after the 9:30 in-app health email)
+    - cron: '0 2 * * *'    # 10:00 PM ET
+  workflow_dispatch: {}
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe /health
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then echo "HEALTH_URL secret not set"; exit 1; fi
+          code=$(curl -s -o body.json -w '%{http_code}' --max-time 120 "$HEALTH_URL")
+          echo "HTTP $code"; cat body.json || true
+          if [ "$code" != "200" ]; then
+            echo "::error::LinkedIn Autopilot unhealthy (HTTP $code)"; exit 1
+          fi

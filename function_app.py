@@ -5,7 +5,8 @@ The schedules come from jobs.SCHEDULE so Azure and worker.py never drift.
 
 HTTP (function-key protected):
   linkedin_run?action=generate&group=a..e|company=<name>&hours=N
-  linkedin_run?action=drain
+  linkedin_run?action=drain | heal            (heal = refill queue if empty, then post)
+  health                                       JSON status, 503 when something is wrong
   linkedin_run?action=testcard&company=<name>
   growth_run?action=ask|poll
   run_now?company=<name>&hours=N        manual email batch (optional feature)
@@ -73,7 +74,25 @@ def growth_poll(timer: func.TimerRequest) -> None:
     jobs.run("growth_poll")
 
 
+@app.timer_trigger(schedule=_ncron("30 13 * * *"), arg_name="timer", run_on_startup=False)
+def health_report(timer: func.TimerRequest) -> None:
+    jobs.run("health_report")
+
+
 # ---- manual HTTP routes ----
+
+@app.route(route="health", auth_level=func.AuthLevel.FUNCTION)
+def health(req: func.HttpRequest) -> func.HttpResponse:
+    """JSON health for external watchdogs (GitHub Actions). 200 ok / 503 alert."""
+    try:
+        import json as _json
+        r = jobs.health()
+        return func.HttpResponse(_json.dumps(r, indent=1), mimetype="application/json",
+                                 status_code=200 if r["status"] == "ok" else 503)
+    except Exception:
+        return _text("CRASH:\n" + traceback.format_exc(), 500)
+
+
 
 @app.route(route="linkedin_run", auth_level=func.AuthLevel.FUNCTION)
 def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
@@ -83,6 +102,8 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
             target = req.params.get("company") or req.params.get("group") or None
             hours = int(req.params.get("hours", "24"))
             out = jobs.generate(target, hours)
+        elif action == "heal":
+            out = jobs.heal()
         elif action == "testcard":
             out = [f"test card posted: {jobs.test_card(req.params.get('company', 'microsoft'))}"]
         else:

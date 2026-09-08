@@ -152,7 +152,7 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 8   # 5 gen + drain + growth ask/poll
+    assert src.count("timer_trigger") == 9   # 5 gen + drain + growth ask/poll + health
     assert '"0 12 * * *"' in src and '"20 12 * * *"' in src and '"30 12 * * *"' in src
     assert '"5-55/10 * * * *"' in src         # drain every 10 min, offset from generates
     assert '"0 11 * * *"' not in src           # no email timers
@@ -440,3 +440,42 @@ def test_schedule_matches_azure_timers():
         assert f'"{cron}"' in src, f"{name} cron {cron} missing from function_app"
         assert callable(fn)
     assert set(jobs.GROUPS) == {"a", "b", "c", "d", "e"}
+
+
+# ---------- fallbacks + watchdog ----------
+
+def test_health_assess_flags_gaps(tmp_path, monkeypatch):
+    import datetime as dt, json
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, healthcheck, linkedin_client
+    monkeypatch.setattr(linkedin_client, "token_valid", lambda: True)
+    s = storage.get_store("linkedin-posts")
+    now = dt.datetime.now(dt.timezone.utc)
+    good = [{"ts": (now - dt.timedelta(minutes=10 * i)).isoformat(), "company": "x", "urn": "u"} for i in range(144)]
+    s.upload_blob("li_post_log.json", json.dumps(good))
+    s.upload_blob("li_queue.json", json.dumps([{"a": 1}]))
+    s.upload_blob("li_secrets.json", json.dumps({"linkedin_autopost_enabled": "true"}))
+    healthcheck.record(s, "generate", True, "ok")
+    r = healthcheck.assess(s)
+    assert r["status"] == "ok" and r["posts_24h"] == 144 and r["max_gap_min"] <= 10
+    # now a 3-hour hole
+    hole = [p for p in good if not (60 <= (now - dt.datetime.fromisoformat(p["ts"])).total_seconds() / 60 <= 240)]
+    s.upload_blob("li_post_log.json", json.dumps(hole))
+    r = healthcheck.assess(s)
+    assert r["status"] == "alert" and any("gap" in i for i in r["issues"])
+
+
+def test_drain_refills_when_queue_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import jobs, linkedin_autopost as la
+    calls = []
+    monkeypatch.setattr(la, "drain", lambda store: ["queue empty"] if not calls else ["0 posted, 2 left"])
+    monkeypatch.setattr(la, "generate", lambda store, loader, companies, hours: (calls.append(hours), [f"gen {hours}h"])[1])
+    out = jobs.drain()
+    assert calls and calls[0] == 24                      # refill kicked in with the 24h window
+    assert any("refill" in n for n in out)
+
+
+def test_schedule_has_health_job():
+    import jobs
+    assert "health_report" in {n for n, _, _ in jobs.SCHEDULE}

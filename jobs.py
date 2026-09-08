@@ -13,9 +13,11 @@ cron). Azure timers and the worker loop are both generated from it.
 import logging
 import traceback
 
+import json
 import card_builder
 import linkedin_autopost
 import growth_check
+import healthcheck
 import emailer
 from storage import get_store
 from companies import COMPANIES, GROUPS, GROUP_A, GROUP_B, GROUP_C, GROUP_D, GROUP_E
@@ -52,9 +54,56 @@ def generate(companies=None, hours=24):
     return linkedin_autopost.generate(posts_store(), logo_loader, companies, hours)
 
 
+MIN_QUEUE = 3
+REFILL_WINDOWS_H = (24, 72, 168)     # widen until something is found
+
+
+def ensure_queue(min_items=MIN_QUEUE):
+    """FALLBACK: if the queue is (nearly) empty, refill from all companies with a
+    widening lookback so there is always something to post. Dedup by posted
+    ids means widening never re-posts a job."""
+    store = posts_store()
+    notes = []
+
+    def depth():
+        try:
+            return len(json.loads(store.download_blob("li_queue.json").readall()))
+        except Exception:
+            return 0
+
+    if depth() >= min_items:
+        return ["queue ok"]
+    # group by group (each call saves its own cards) so a serverless timeout
+    # can never lose work; stop as soon as there is something to post
+    for hours in REFILL_WINDOWS_H:
+        for g, members in GROUPS.items():
+            notes.append(f"queue={depth()} < {min_items}: refill group {g} @ {hours}h")
+            notes += linkedin_autopost.generate(store, logo_loader, members, hours)
+            if depth() >= min_items:
+                return notes
+    return notes
+
+
 def drain():
-    """Post the next due card (rate-limited inside)."""
-    return linkedin_autopost.drain(posts_store())
+    """Post the next due card; if the queue ran dry, refill first (fallback)."""
+    out = linkedin_autopost.drain(posts_store())
+    if any(n.startswith("queue empty") for n in out):
+        out += ensure_queue()
+        out += linkedin_autopost.drain(posts_store())
+    return out
+
+
+def heal():
+    """Manual/automatic kick: refill if needed, then post one. Safe to call anytime."""
+    return ensure_queue() + linkedin_autopost.drain(posts_store())
+
+
+def health():
+    return healthcheck.assess(posts_store())
+
+
+def health_report():
+    return healthcheck.daily_report(posts_store())
 
 
 # ---------- growth loop (email check-in + chat) ----------
@@ -103,6 +152,7 @@ SCHEDULE = [
     ("drain",      "5-55/10 * * * *", drain),                       # one post / 10 min, 24/7
     ("growth_ask", "0 13 * * *",      growth_ask),                  # 9 AM ET check-in email
     ("growth_poll","*/20 * * * *",    growth_poll),                 # read replies / chat
+    ("health_report", "30 13 * * *",  health_report),               # 9:30 AM ET watchdog email
 ]
 
 

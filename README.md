@@ -47,6 +47,17 @@ python worker.py                # scheduler + /health on $PORT
 
 **Steer from your phone:** reply to the daily "LinkedIn Growth Check-in" email with a number (logged + analysed) or a sentence ("pause posting", "make it 5 per company", "how's the queue?") — answered within 20 minutes, changes applied.
 
+## Fallbacks & watchdog ("posting is mandatory")
+
+- **Queue never runs dry** — every drain that finds an empty queue refills it group-by-group with a widening lookback (24h → 72h → 7 days). Dedup means nothing is ever posted twice.
+- **Image path fails → text-only post** (same caption) instead of skipping the slot.
+- **One company crashes → the rest still generate** (per-company isolation).
+- **Token dies → immediate alert email** (rate-limited), since that needs a human.
+- **Heartbeats** (`li_health.json`) from every generate/drain.
+- **Daily health email, 9:30 AM ET** — posts in last 24h, largest gap between posts, queue depth; subject starts with 🚨 ALERT when the 10-minute contract was broken.
+- **External watchdog** — `.github/workflows/watchdog.yml` probes `/health` twice a day *from GitHub*; a 503 fails the run and GitHub emails you, so even a dead Azure host gets noticed.
+- Manual kick from anywhere: `linkedin_run?action=heal` (Azure) or `python worker.py run drain` / `generate` (worker).
+
 ## Adding a company
 
 1. Pipeline: one line in `board_pipelines.py` if it's Greenhouse/Ashby (or a small module for a custom API).

@@ -241,60 +241,73 @@ def generate(container, logo_loader=None, companies=None, hours=24):
     per_company = []   # entries per company, merged round-robin at the end
     for company in targets:
         cfg = COMPANIES[company]
-        state = _load(container, _li_state_blob(company),
-                      {"posted_ids": [], "last_run": None})
-        cutoff = now - timedelta(hours=hours)
         try:
-            fresh = cfg["pipeline"].get_jobs(cutoff)
+            _generate_one(container, logo_loader, company, cfg, now, date_str, per_company, notes, hours)
         except Exception as e:
-            notes.append(f"{company}: fetch failed {e}")
-            continue
-        posted = set(state.get("posted_ids", []))
-        new = [j for j in fresh if str(j.get("id")) not in posted]
-        cards_cap = max(1, min(10, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
-        jpc = max(1, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
-        new = cfg["pipeline"].sort_software_first(new)[:cards_cap * jpc]
-        if not new:
-            state["last_run"] = now.isoformat()
-            _save(container, _li_state_blob(company), state)
-            notes.append(f"{company}: no new jobs")
-            continue
-        # divide across up to cards_cap posts (1..jpc jobs each)
-        chunks = card_builder.split_into(new, min(cards_cap, len(new)))
-        comp_entries = []
-        for i, chunk in enumerate(chunks):
-            # enrich for salary on the card (best-effort, bounded to this chunk)
-            for j in chunk:
-                try:
-                    key = j.get("externalPath") if company == "nvidia" else j.get("id")
-                    det = cfg["pipeline"].fetch_detail(key) or {}
-                    j["_detail"] = det
-                    if det.get("salary"):
-                        j["salary"] = det["salary"]
-                except Exception:
-                    pass
-            card_blob = f"{CARDS_PREFIX}{company}_logo.png"
-            try:
-                container.download_blob(card_blob).readall()   # exists — reuse
-            except Exception:
-                png = card_builder.build_card(company, chunk, logo_loader=logo_loader)
-                container.upload_blob(card_blob, png, overwrite=True)
-            style = random.choice(HOOK_VARIANTS)
-            caption = _caption(company, chunk, i + 1, len(chunks), style)
-            comp_entries.append({
-                "company": company,
-                "card_blob": card_blob,
-                "caption": caption,
-                "variant": style,
-                "title": f"{card_builder.display_name(company)} is hiring",
-                "created": now.isoformat(),
-            })
-        per_company.append(comp_entries)
-        state["posted_ids"] = list(dict.fromkeys(
-            list(posted) + [str(j.get("id")) for j in fresh]))[-8000:]
+            notes.append(f"{company}: crashed {type(e).__name__}: {str(e)[:120]}")
+    _finish_generate(container, queue, added, per_company, now, slot, notes)
+    return notes
+
+
+def _generate_one(container, logo_loader, company, cfg, now, date_str, per_company, notes, hours):
+    """One company's fetch → chunk → card → caption. Raises on failure (caller isolates)."""
+    state = _load(container, _li_state_blob(company),
+                  {"posted_ids": [], "last_run": None})
+    cutoff = now - timedelta(hours=hours)
+    try:
+        fresh = cfg["pipeline"].get_jobs(cutoff)
+    except Exception as e:
+        notes.append(f"{company}: fetch failed {e}")
+        return
+    posted = set(state.get("posted_ids", []))
+    new = [j for j in fresh if str(j.get("id")) not in posted]
+    cards_cap = max(1, min(10, int(_cfg("cards_per_company", CARDS_PER_COMPANY))))
+    jpc = max(1, min(6, int(_cfg("jobs_per_card", JOBS_PER_CARD))))
+    new = cfg["pipeline"].sort_software_first(new)[:cards_cap * jpc]
+    if not new:
         state["last_run"] = now.isoformat()
         _save(container, _li_state_blob(company), state)
-        notes.append(f"{company}: queued {len(chunks)} cards ({len(new)} jobs)")
+        notes.append(f"{company}: no new jobs")
+        return
+    # divide across up to cards_cap posts (1..jpc jobs each)
+    chunks = card_builder.split_into(new, min(cards_cap, len(new)))
+    comp_entries = []
+    for i, chunk in enumerate(chunks):
+        # enrich for salary on the card (best-effort, bounded to this chunk)
+        for j in chunk:
+            try:
+                key = j.get("externalPath") if company == "nvidia" else j.get("id")
+                det = cfg["pipeline"].fetch_detail(key) or {}
+                j["_detail"] = det
+                if det.get("salary"):
+                    j["salary"] = det["salary"]
+            except Exception:
+                pass
+        card_blob = f"{CARDS_PREFIX}{company}_logo.png"
+        try:
+            container.download_blob(card_blob).readall()   # exists — reuse
+        except Exception:
+            png = card_builder.build_card(company, chunk, logo_loader=logo_loader)
+            container.upload_blob(card_blob, png, overwrite=True)
+        style = random.choice(HOOK_VARIANTS)
+        caption = _caption(company, chunk, i + 1, len(chunks), style)
+        comp_entries.append({
+            "company": company,
+            "card_blob": card_blob,
+            "caption": caption,
+            "variant": style,
+            "title": f"{card_builder.display_name(company)} is hiring",
+            "created": now.isoformat(),
+        })
+    per_company.append(comp_entries)
+    state["posted_ids"] = list(dict.fromkeys(
+        list(posted) + [str(j.get("id")) for j in fresh]))[-8000:]
+    state["last_run"] = now.isoformat()
+    _save(container, _li_state_blob(company), state)
+    notes.append(f"{company}: queued {len(chunks)} cards ({len(new)} jobs)")
+
+
+def _finish_generate(container, queue, added, per_company, now, slot, notes):
     while any(per_company):
         for lst in per_company:
             if lst:
@@ -306,7 +319,11 @@ def generate(container, logo_loader=None, companies=None, hours=24):
     queue = _load(container, QUEUE_BLOB, []) + added
     _save(container, QUEUE_BLOB, queue)
     notes.append(f"queue length {len(queue)}")
-    return notes
+    try:
+        import healthcheck
+        healthcheck.record(container, "generate", True, f"+{len(added)} cards, queue {len(queue)}")
+    except Exception:
+        pass
 
 
 def _in_posting_window(now):
@@ -340,9 +357,13 @@ def drain(container):
         return ["queue empty"]
     try:
         token = linkedin_client._token()
-    except Exception:
-        return ["no LINKEDIN_ACCESS_TOKEN (env or blob)"]
-    urn = linkedin_client.person_urn(token)
+        urn = linkedin_client.person_urn(token)
+    except Exception as e:
+        import healthcheck
+        healthcheck.record(container, "drain", False, f"token/urn failure: {e}")
+        healthcheck.alert(container, "LinkedIn token problem",
+                          f"Posting is blocked: {e}\nRe-authorize the LinkedIn app and store the new token.")
+        return [f"token failure: {e}"]
     remaining, posted, notes = [], 0, []
     for item in queue:
         due = datetime.datetime.fromisoformat(item["post_after"]) <= now
@@ -370,10 +391,36 @@ def drain(container):
                 pass
             posted += 1
         except Exception as e:
+            err = str(e)
+            # FALLBACK 1: image path broke (upload/asset/PNG) -> post the caption as text
+            if any(k in err.lower() for k in ("registerupload", "upload", "asset", "png", "image", "media")):
+                try:
+                    share = linkedin_client.post_text(item["caption"], token=token)
+                    notes.append(f"posted {item['company']} TEXT-ONLY fallback {share}")
+                    plog = _load(container, "li_post_log.json", [])
+                    plog.append({"ts": now.isoformat(), "company": item["company"],
+                                 "variant": item.get("variant", "salary_hook"),
+                                 "urn": share, "fallback": "text"})
+                    _save(container, "li_post_log.json", plog[-2000:])
+                    posted += 1
+                    continue
+                except Exception as e2:
+                    err = f"{err} | text fallback: {e2}"
             item["retries"] = item.get("retries", 0) + 1
             if item["retries"] < 3:
                 remaining.append(item)
-            notes.append(f"{item['company']} failed ({item.get('retries')}): {e}")
+            notes.append(f"{item['company']} failed ({item.get('retries')}): {err[:160]}")
+            if "401" in err or "expired" in err.lower():
+                import healthcheck
+                healthcheck.alert(container, "LinkedIn token rejected",
+                                  f"A post failed with an auth error: {err[:300]}")
     _save(container, QUEUE_BLOB, remaining)
     notes.append(f"{posted} posted, {len(remaining)} left")
+    try:
+        import healthcheck
+        failed = [n for n in notes if "failed" in n]
+        healthcheck.record(container, "drain", not failed,
+                           failed[0] if failed else f"{posted} posted, {len(remaining)} left")
+    except Exception:
+        pass
     return notes
