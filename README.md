@@ -35,7 +35,7 @@ Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
 
 **Azure Functions (current):** zip the repo root (`function_app.py`, `host.json`, modules, `requirements.txt`) → Kudu zipdeploy. App settings: `AzureWebJobsStorage`, `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, `MAIL_TO`. Secrets/config live in blob `linkedin-posts/li_secrets.json`.
 
-**Railway / Docker / anywhere:** see [docs/MIGRATION.md](docs/MIGRATION.md). Short version:
+**Railway / Docker / anywhere:** see [docs/MIGRATION.md](docs/MIGRATION.md); module/function/data-structure map in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Short version:
 
 ```bash
 cp .env.example .env            # STORAGE_BACKEND=file, DATA_DIR, Gmail, tokens
