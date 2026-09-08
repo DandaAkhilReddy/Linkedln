@@ -105,12 +105,11 @@ class FakeContainer:
 
 
 def _setup_fa(monkeypatch, jobs):
-    os.environ.setdefault("AzureWebJobsStorage", "fake")
-    import function_app as fa
+    """Returns (emailer module, fake store). batch_run(store, company, label, suffix)."""
+    import emailer as fa
     import ms_jobs_pipeline as msp
     c = FakeContainer()
-    monkeypatch.setattr(fa, "_container", lambda: c)
-    monkeypatch.setattr(fa, "_send_email", lambda post, subject, label: f"emailed {label}")
+    monkeypatch.setattr(fa, "send_email", lambda post, subject, label: f"emailed {label}")
     monkeypatch.setattr(msp, "get_jobs", lambda cutoff=None: list(jobs))
     monkeypatch.setattr(msp, "render_posts", lambda b: f"<{len(b)} posts>")
     return fa, c
@@ -119,9 +118,9 @@ def _setup_fa(monkeypatch, jobs):
 def test_no_duplicates_across_three_sends(monkeypatch):
     jobs = [{"id": i, "name": f"Software Engineer {i}"} for i in range(120)]
     fa, c = _setup_fa(monkeypatch, jobs)
-    n1 = fa.batch_run("microsoft", "7 AM", "0700")
-    n2 = fa.batch_run("microsoft", "2 PM", "1400")
-    n3 = fa.batch_run("microsoft", "7 PM", "1900")
+    n1 = fa.batch_run(c, "microsoft", "7 AM", "0700")
+    n2 = fa.batch_run(c, "microsoft", "2 PM", "1400")
+    n3 = fa.batch_run(c, "microsoft", "7 PM", "1900")
     state = json.loads(c.blobs["state.json"])
     assert len(state["sent_ids"]) == 120
     assert len(set(state["sent_ids"])) == 120   # every job sent exactly once
@@ -132,19 +131,19 @@ def test_no_duplicates_across_three_sends(monkeypatch):
 def test_parked_jobs_drain_first(monkeypatch):
     jobs = [{"id": i, "name": f"SDE {i}"} for i in range(60)]
     fa, c = _setup_fa(monkeypatch, jobs)
-    fa.batch_run("microsoft", "7 AM", "0700")            # sends 50, parks 10
+    fa.batch_run(c, "microsoft", "7 AM", "0700")            # sends 50, parks 10
     st = json.loads(c.blobs["state.json"])
     assert len(st["parked"]) == 10
     import ms_jobs_pipeline as msp
     monkeypatch.setattr(msp, "get_jobs", lambda cutoff=None: [])  # nothing new
-    fa.batch_run("microsoft", "2 PM", "1400")            # drains the 10 parked
+    fa.batch_run(c, "microsoft", "2 PM", "1400")            # drains the 10 parked
     st = json.loads(c.blobs["state.json"])
     assert st["parked"] == [] and len(st["sent_ids"]) == 60
 
 
 def test_no_jobs_no_email(monkeypatch):
     fa, c = _setup_fa(monkeypatch, [])
-    notes = fa.batch_run("microsoft", "7 AM", "0700")
+    notes = fa.batch_run(c, "microsoft", "7 AM", "0700")
     assert "no new jobs" in notes[0]
     assert not any(k.startswith("post_") for k in c.blobs)  # no post blob written
 
@@ -154,9 +153,9 @@ def test_linkedin_only_timers():
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
     assert src.count("timer_trigger") == 8   # 5 gen + drain + growth ask/poll
-    assert '"0 0 12 * * *"' in src and '"0 20 12 * * *"' in src and '"0 30 12 * * *"' in src
-    assert '"0 5/10 * * * *"' in src          # drain offset from generates
-    assert '"0 0 11 * * *"' not in src         # no email timers
+    assert '"0 12 * * *"' in src and '"20 12 * * *"' in src and '"30 12 * * *"' in src
+    assert '"5-55/10 * * * *"' in src         # drain every 10 min, offset from generates
+    assert '"0 11 * * *"' not in src           # no email timers
     assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C + fa.GROUP_D + fa.GROUP_E) == set(fa.COMPANIES)
 
 
@@ -167,7 +166,7 @@ def test_catchup_lookback_override(monkeypatch):
     import ms_jobs_pipeline as msp
     monkeypatch.setattr(msp, "get_jobs",
                         lambda cutoff=None: captured.setdefault("cutoff", cutoff) and [] or list(jobs))
-    fa.batch_run("microsoft", "catch-up", "manual", lookback_hours=72)
+    fa.batch_run(c, "microsoft", "catch-up", "manual", lookback_hours=72)
     import datetime as dt
     from datetime import timezone
     age_h = (dt.datetime.now(timezone.utc) - captured["cutoff"]).total_seconds() / 3600
@@ -216,8 +215,8 @@ def test_company_states_are_isolated(monkeypatch):
     import apple_jobs_pipeline as ap
     monkeypatch.setattr(ap, "get_jobs", lambda cutoff=None: list(jobs_ap))
     monkeypatch.setattr(ap, "render_posts", lambda b: f"<{len(b)}>")
-    fa.batch_run("microsoft", "t", "x")
-    fa.batch_run("apple", "t", "x")
+    fa.batch_run(c, "microsoft", "t", "x")
+    fa.batch_run(c, "apple", "t", "x")
     ms_state = json.loads(c.blobs["state.json"])
     ap_state = json.loads(c.blobs["apple_state.json"])
     assert len(ms_state["sent_ids"]) == 5 and len(ap_state["sent_ids"]) == 5
@@ -356,7 +355,7 @@ def test_meta_seed_first_run(monkeypatch):
     import meta_jobs_pipeline as mp
     monkeypatch.setattr(mp, "get_jobs", lambda cutoff=None: list(jobs))
     monkeypatch.setattr(mp, "render_posts", lambda b: f"<{len(b)}>")
-    notes = fa.batch_run("meta", "t", "x")
+    notes = fa.batch_run(c, "meta", "t", "x")
     st = json.loads(c.blobs["meta_state.json"])
     assert len(st["sent_ids"]) == 120        # everything seeded
     assert st["parked"] == []                # nothing parked on seed
@@ -364,7 +363,7 @@ def test_meta_seed_first_run(monkeypatch):
     # second run: only genuinely new ids get emailed
     jobs2 = jobs + [{"id": "brand-new", "title": "Software Engineer, New"}]
     monkeypatch.setattr(mp, "get_jobs", lambda cutoff=None: list(jobs2))
-    notes2 = fa.batch_run("meta", "t", "x")
+    notes2 = fa.batch_run(c, "meta", "t", "x")
     assert "1 jobs" in notes2[0]
 
 
@@ -392,3 +391,52 @@ def test_board_pipelines_interface():
     assert "$80,500 - $115,000" in post and "#AMDCareers" in post
     assert bp._is_us({"locations": ["Bucharest, Romania"]}) is False
     assert bp._is_us({"locations": ["San Francisco, CA"]}) is True
+
+
+# ---------- portability layer ----------
+
+def test_filestore_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage
+    s = storage.get_store("linkedin-posts")
+    s.upload_blob("li_queue.json", '[{"a": 1}]', overwrite=True)
+    s.upload_blob("li_cards/x.png", b"\x89PNG", overwrite=True)
+    assert s.download_blob("li_queue.json").readall() == b'[{"a": 1}]'
+    assert {b.name for b in s.list_blobs()} == {"li_queue.json", "li_cards/x.png"}
+    assert [b.name for b in s.list_blobs(name_starts_with="li_cards/")] == ["li_cards/x.png"]
+    s.delete_blob("li_queue.json")
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        s.download_blob("li_queue.json")
+    with pytest.raises(ValueError):
+        s.download_blob("../../etc/passwd")
+
+
+def test_backend_autodetect(monkeypatch):
+    import storage
+    monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.delenv("AzureWebJobsStorage", raising=False)
+    monkeypatch.delenv("AZURE_STORAGE_CONNECTION_STRING", raising=False)
+    assert storage.backend() == "file"
+    monkeypatch.setenv("AzureWebJobsStorage", "UseDevelopmentStorage=true")
+    assert storage.backend() == "azure"
+
+
+def test_cron_matcher():
+    import datetime as dt
+    from worker import cron_matches
+    t = lambda h, m: dt.datetime(2026, 9, 8, h, m)
+    assert cron_matches("0 12 * * *", t(12, 0)) and not cron_matches("0 12 * * *", t(12, 1))
+    assert cron_matches("5-55/10 * * * *", t(3, 25)) and not cron_matches("5-55/10 * * * *", t(3, 20))
+    assert cron_matches("*/20 * * * *", t(9, 40)) and not cron_matches("*/20 * * * *", t(9, 30))
+
+
+def test_schedule_matches_azure_timers():
+    """The worker and the Azure adapter must run the same schedule."""
+    import jobs, function_app as fa
+    src = open(pathlib.Path(fa.__file__)).read()
+    for name, cron, fn in jobs.SCHEDULE:
+        assert f'"{cron}"' in src, f"{name} cron {cron} missing from function_app"
+        assert callable(fn)
+    assert set(jobs.GROUPS) == {"a", "b", "c", "d", "e"}

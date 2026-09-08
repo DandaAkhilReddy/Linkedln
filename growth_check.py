@@ -1,6 +1,6 @@
 """
 Phone-friendly follower check-in loop, fully serverless:
-  - send_ask(): emails "reply with your follower count" (Mon/Thu timer)
+  - send_ask(): emails "reply with your follower count" (daily timer)
   - poll_replies(): reads the reply via Gmail IMAP, logs it to blob
     growth_log.json, and emails back a growth analysis vs the daily goal.
 Reuses the function app's existing GMAIL_USERNAME / GMAIL_APP_PASSWORD /
@@ -189,8 +189,9 @@ def poll_replies(container):
 def _chat_reply(container, subj, user_text):
     """Free-form email chat via Azure OpenAI; can apply config ACTIONs."""
     sec = _secrets(container)
-    ep, key = sec.get("aoai_endpoint"), sec.get("aoai_key")
-    dep = sec.get("aoai_deployment", "gpt-4o-mini")
+    ep = sec.get("aoai_endpoint") or os.getenv("AOAI_ENDPOINT")
+    key = sec.get("aoai_key") or os.getenv("AOAI_KEY")
+    dep = sec.get("aoai_deployment") or os.getenv("AOAI_DEPLOYMENT", "gpt-4o-mini")
     reply_subj = subj if subj.lower().startswith("re:") else "Re: " + subj
     if not (ep and key):
         _send(reply_subj,

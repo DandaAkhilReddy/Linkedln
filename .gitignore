@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 .env
 local.settings.json
 post.txt
-.pytest_cache/
+data/
+# preview renders; the shipped logos live in logos/
+/*.png
+!logos/*.png

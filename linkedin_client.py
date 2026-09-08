@@ -19,13 +19,11 @@ API = "https://api.linkedin.com"
 
 
 def _blob_secrets():
-    """Read li_secrets.json from the linkedin-posts container (MFA-free path)."""
+    """Read li_secrets.json from the posts store (Azure Blob or local files)."""
     try:
-        from azure.storage.blob import BlobServiceClient
-        conn = os.environ["AzureWebJobsStorage"]
-        c = BlobServiceClient.from_connection_string(conn).get_container_client("linkedin-posts")
         import json as _j
-        return _j.loads(c.download_blob("li_secrets.json").readall())
+        from storage import get_store
+        return _j.loads(get_store("linkedin-posts").download_blob("li_secrets.json").readall())
     except Exception:
         return {}
 

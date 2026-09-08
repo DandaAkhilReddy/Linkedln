@@ -1,2 +1,6 @@
+# Runtime dependencies for every host (Azure Functions, Railway/Docker, local).
 requests
 curl_cffi
+pillow
+azure-functions
+azure-storage-blob
