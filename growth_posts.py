@@ -185,11 +185,30 @@ def record_facts(store, company, jobs, job_loc, job_url):
         return 0
 
 
-def top_paid(store, days=7, n=10, per_company=2):
-    """Highest-paying roles of the last `days` days, at most `per_company` each."""
+CAROUSEL_STATE = "li_carousel_state.json"
+
+
+def _featured(store):
+    """URLs shown in the last few carousels, so each day's deck is fresh."""
+    return set(_load(store, CAROUSEL_STATE, {}).get("featured", []))
+
+
+def _remember_featured(store, items):
+    st = _load(store, CAROUSEL_STATE, {})
+    st["featured"] = (st.get("featured", []) + [f["url"] for f in items])[-40:]   # ~3 decks
+    store.upload_blob(CAROUSEL_STATE, json.dumps(st), overwrite=True)
+
+
+def top_paid(store, days=7, n=10, per_company=2, exclude=None):
+    """Highest-paying roles of the last `days` days, at most `per_company` each,
+    skipping `exclude` urls (roles already featured) when enough remain."""
     facts = _load(store, FACTS_BLOB, [])
     cutoff = (datetime.datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     recent = [f for f in facts if f.get("ts", "") >= cutoff and f.get("top")]
+    if exclude:
+        fresh = [f for f in recent if f.get("url") not in exclude]
+        if len(fresh) >= 5:
+            recent = fresh
     recent.sort(key=lambda f: -f["top"])
     out, count = [], {}
     for f in recent:
@@ -417,7 +436,7 @@ def daily_roundup(store, logo_loader=None):
         return [f"roundup skipped: {why}"]
     if _already_today(store, "carousel"):
         return ["roundup already posted today"]
-    items = top_paid(store)
+    items = top_paid(store, exclude=_featured(store))
     if len(items) < 5:
         return [f"roundup skipped: only {len(items)} paid roles on record"]
     import linkedin_client
@@ -442,6 +461,7 @@ def daily_roundup(store, logo_loader=None):
         + "\n\n" + " ".join(ltf_tag(t) for t in ("TechJobs", "Hiring", "Salary", "JobSearch", "Careers")))
     urn = post_document(pdf, f"{len(items)} highest-paying tech jobs this week", commentary, token, author)
     _log_post(store, "carousel", urn, extra={"items": len(items)})
+    _remember_featured(store, items)
     return [f"roundup posted {urn} ({len(items)} roles, {len(pdf) // 1024} KB)"]
 
 

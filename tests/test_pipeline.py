@@ -527,6 +527,7 @@ def test_record_facts_and_top_paid(tmp_path, monkeypatch):
     gp.record_facts(s, "openai", [mk(1, 300000)], lambda j: "Remote", lambda c, j: "")   # duplicate ignored
     top = gp.top_paid(s, n=10, per_company=2)
     assert [f["top"] for f in top] == [550000, 500000, 450000]        # max 2 per company, unpaid dropped
+    assert len(gp.top_paid(s, exclude={"https://a/3"})) == 3          # too few left -> exclusion ignored
     assert gp.company_tops(s)["stripe"][0] == 500000
 
 
