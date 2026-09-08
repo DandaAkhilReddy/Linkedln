@@ -33,6 +33,7 @@ import openai_jobs_pipeline
 import anthropic_jobs_pipeline
 import netflix_jobs_pipeline
 import xai_jobs_pipeline
+import board_pipelines
 import linkedin_autopost
 import growth_check
 import card_builder
@@ -67,6 +68,21 @@ COMPANIES = {
     "xai": {"pipeline": xai_jobs_pipeline, "state": "xai_state.json",
             "prefix": "xai_post", "subject": "✖️ xAI jobs LinkedIn posts",
             "seed_first_run": True},
+    # --- board-factory companies (board_pipelines.py) ---
+    "databricks": {"pipeline": board_pipelines.databricks, "state": "databricks_state.json",
+                   "prefix": "databricks_post", "subject": "\U0001F9F1 Databricks jobs", "seed_first_run": True},
+    "stripe": {"pipeline": board_pipelines.stripe, "state": "stripe_state.json",
+               "prefix": "stripe_post", "subject": "\U0001F4B3 Stripe jobs", "seed_first_run": True},
+    "scaleai": {"pipeline": board_pipelines.scaleai, "state": "scaleai_state.json",
+                "prefix": "scaleai_post", "subject": "\U0001F4D0 Scale AI jobs", "seed_first_run": True},
+    "ramp": {"pipeline": board_pipelines.ramp, "state": "ramp_state.json",
+             "prefix": "ramp_post", "subject": "\U0001F7E8 Ramp jobs"},
+    "cursor": {"pipeline": board_pipelines.cursor, "state": "cursor_state.json",
+               "prefix": "cursor_post", "subject": "⌨️ Cursor jobs"},
+    "amd": {"pipeline": board_pipelines.amd, "state": "amd_state.json",
+            "prefix": "amd_post", "subject": "\U0001F534 AMD jobs"},
+    "ibm": {"pipeline": board_pipelines.ibm, "state": "ibm_state.json",
+            "prefix": "ibm_post", "subject": "\U0001F535 IBM jobs"},
 }
 
 # Split across invocations so each stays under the 10-minute function timeout
@@ -74,6 +90,8 @@ COMPANIES = {
 GROUP_A = ["anthropic", "openai", "microsoft", "apple"]
 GROUP_B = ["google", "amazon", "nvidia"]
 GROUP_C = ["meta", "netflix", "xai"]
+GROUP_D = ["databricks", "stripe", "scaleai", "ramp", "cursor"]   # single-call boards, fast
+GROUP_E = ["amd", "ibm"]
 
 
 def _container():
@@ -281,6 +299,22 @@ def growth_run(req: func.HttpRequest) -> func.HttpResponse:
                                  mimetype="text/plain; charset=utf-8")
 
 
+@app.timer_trigger(schedule="0 40 12 * * *", arg_name="timer", run_on_startup=False)
+def linkedin_generate_d(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI gen D: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_D)))
+    except Exception:
+        logging.error("LI gen D crashed:\n%s", traceback.format_exc())
+
+
+@app.timer_trigger(schedule="0 50 12 * * *", arg_name="timer", run_on_startup=False)
+def linkedin_generate_e(timer: func.TimerRequest) -> None:
+    try:
+        logging.info("LI gen E: %s", "; ".join(linkedin_autopost.generate(_container(), _logo_loader, GROUP_E)))
+    except Exception:
+        logging.error("LI gen E crashed:\n%s", traceback.format_exc())
+
+
 # every 10 min — post exactly one due card (6/hour, 24/7)
 @app.timer_trigger(schedule="0 5/10 * * * *", arg_name="timer", run_on_startup=False)
 def linkedin_drain(timer: func.TimerRequest) -> None:
@@ -302,7 +336,8 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
             hours = int(req.params.get("hours", "24"))
             subset = ([one] if one in COMPANIES else
                       GROUP_A if g == "a" else GROUP_B if g == "b" else
-                      GROUP_C if g == "c" else None)
+                      GROUP_C if g == "c" else GROUP_D if g == "d" else
+                      GROUP_E if g == "e" else None)
             out = linkedin_autopost.generate(c, _logo_loader, subset, hours)
         elif action == "testcard":
             company = req.params.get("company", "microsoft")

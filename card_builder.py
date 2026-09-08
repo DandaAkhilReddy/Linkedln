@@ -26,12 +26,20 @@ THEME = {
     "anthropic": {"accent": "#cc785c", "base": (26, 22, 19),  "name": "ANTHROPIC"},
     "netflix":   {"accent": "#e50914", "base": (18, 18, 18),  "name": "NETFLIX"},
     "xai":       {"accent": "#c9ced6", "base": (10, 10, 12),  "name": "XAI"},
+    "amd":       {"accent": "#ed1c24", "base": (16, 16, 18),  "name": "AMD"},
+    "databricks":{"accent": "#ff3621", "base": (20, 14, 14),  "name": "DATABRICKS"},
+    "stripe":    {"accent": "#635bff", "base": (14, 14, 30),  "name": "STRIPE"},
+    "scaleai":   {"accent": "#7b61ff", "base": (12, 12, 20),  "name": "SCALE AI"},
+    "ramp":      {"accent": "#e4ff5c", "base": (14, 16, 14),  "name": "RAMP"},
+    "cursor":    {"accent": "#c9ced6", "base": (10, 10, 12),  "name": "CURSOR"},
+    "ibm":       {"accent": "#0f62fe", "base": (10, 14, 28),  "name": "IBM"},
 }
 
 DISPLAY = {"microsoft": "Microsoft", "apple": "Apple", "google": "Google",
            "amazon": "Amazon", "meta": "Meta", "nvidia": "NVIDIA",
            "openai": "OpenAI", "anthropic": "Anthropic", "netflix": "Netflix",
-           "xai": "xAI"}
+           "xai": "xAI", "amd": "AMD", "databricks": "Databricks", "stripe": "Stripe",
+           "scaleai": "Scale AI", "ramp": "Ramp", "cursor": "Cursor", "ibm": "IBM"}
 
 
 def display_name(company):

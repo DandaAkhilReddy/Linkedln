@@ -153,11 +153,11 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 6   # 3 gen + drain + growth ask/poll
+    assert src.count("timer_trigger") == 8   # 5 gen + drain + growth ask/poll
     assert '"0 0 12 * * *"' in src and '"0 20 12 * * *"' in src and '"0 30 12 * * *"' in src
     assert '"0 5/10 * * * *"' in src          # drain offset from generates
     assert '"0 0 11 * * *"' not in src         # no email timers
-    assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C) == set(fa.COMPANIES)
+    assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C + fa.GROUP_D + fa.GROUP_E) == set(fa.COMPANIES)
 
 
 def test_catchup_lookback_override(monkeypatch):
@@ -253,13 +253,15 @@ def test_google_sort_software_first():
     jobs = [{"title": "Account Manager"}, {"title": "Software Engineer, Core"}]
     assert gp.sort_software_first(jobs)[0]["title"] == "Software Engineer, Core"
 
-def test_ten_company_config():
+def test_seventeen_company_config():
     import function_app as fa
     assert set(fa.COMPANIES) == {"microsoft", "apple", "google", "amazon", "nvidia",
-                                 "meta", "openai", "anthropic", "netflix", "xai"}
+                                 "meta", "openai", "anthropic", "netflix", "xai",
+                                 "databricks", "stripe", "scaleai", "ramp", "cursor",
+                                 "amd", "ibm"}
     states = {c["state"] for c in fa.COMPANIES.values()}
     prefixes = {c["prefix"] for c in fa.COMPANIES.values()}
-    assert len(states) == 10 and len(prefixes) == 10   # fully isolated
+    assert len(states) == 17 and len(prefixes) == 17   # fully isolated
     for seeded in ("meta", "anthropic", "xai"):        # no posting dates / churny updated_at
         assert fa.COMPANIES[seeded].get("seed_first_run") is True
 
@@ -373,3 +375,20 @@ def test_autopost_module_constants_exist():
     assert isinstance(la.CARDS_PER_COMPANY, int)
     assert isinstance(la.JOBS_PER_CARD, int)
     assert la.HOOK_VARIANTS and la.ORG_URNS.get("microsoft", "").startswith("urn:li:organization:")
+    import function_app as fa
+    assert set(la.ORG_URNS) == set(fa.COMPANIES)   # every company is @taggable
+
+
+def test_board_pipelines_interface():
+    import board_pipelines as bp
+    for name in ("databricks", "stripe", "scaleai", "ramp", "cursor", "amd", "ibm"):
+        p = getattr(bp, name)
+        for fn in ("get_jobs", "sort_software_first", "fetch_detail", "build_post", "render_posts"):
+            assert callable(getattr(p, fn)), f"{name}.{fn}"
+    j = {"id": "1", "title": "Software Engineer", "name": "Software Engineer",
+         "locations": ["Austin, Texas"], "team": "Eng", "_detail": {"salary": "$80,500 - $115,000",
+         "snippet": "x", "level": "", "emp_type": "", "url": "https://careers.amd.com/careers-home/jobs/1"}}
+    post = bp.amd.build_post([j], "September 8, 2026")
+    assert "$80,500 - $115,000" in post and "#AMDCareers" in post
+    assert bp._is_us({"locations": ["Bucharest, Romania"]}) is False
+    assert bp._is_us({"locations": ["San Francisco, CA"]}) is True

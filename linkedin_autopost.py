@@ -38,6 +38,8 @@ CARDS_PER_COMPANY = int(os.getenv("LINKEDIN_CARDS_PER_COMPANY", "10"))
 JOBS_PER_CARD = int(os.getenv("LINKEDIN_JOBS_PER_CARD", "4"))
 SPACING_MIN = int(os.getenv("LINKEDIN_SPACING_MIN", "10"))
 MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "1"))
+DAILY_CAP = int(os.getenv("LINKEDIN_DAILY_CAP", "145"))     # LinkedIn API: 150/member/day
+STALE_HOURS = 36                                            # drop cards older than this
 
 # imported lazily to avoid circular import with function_app
 COMPANIES = None
@@ -57,6 +59,14 @@ ORG_URNS = {
     # xAI rebranded to SpaceXAI; linkedin.com/company/xai redirects to the
     # official SpaceXAI page (verified via x.ai + the LinkedIn redirect)
     "xai":       "urn:li:organization:96151950",
+    # verified from each company's public LinkedIn page (page title matched)
+    "databricks": "urn:li:organization:3477522",
+    "stripe":     "urn:li:organization:2135371",
+    "scaleai":    "urn:li:organization:17998520",
+    "amd":        "urn:li:organization:1497",
+    "ibm":        "urn:li:organization:1009",
+    "ramp":       "urn:li:organization:1406226",
+    "cursor":     "urn:li:organization:105614038",   # linkedin.com/company/cursorai (from cursor.com footer)
 }
 
 HOOK_VARIANTS = ["salary_hook", "question_hook", "urgency_hook"]
@@ -209,7 +219,7 @@ def _caption(company, jobs, part, total, style="salary_hook"):
         "\u267B\ufe0f Repost to help a job seeker in your network.",
         "\U0001F4AC Which one are you applying to? \U0001F447",
         "",
-        f"#{name}Careers #Hiring #TechJobs #JobSearch",
+        f"#{name.replace(' ', '')}Careers #Hiring #TechJobs #JobSearch",
     ]
     cap = "\n".join(lines)
     if len(cap) > 2900:
@@ -277,6 +287,7 @@ def generate(container, logo_loader=None, companies=None, hours=24):
                 "caption": caption,
                 "variant": style,
                 "title": f"{card_builder.display_name(company)} is hiring",
+                "created": now.isoformat(),
             })
         per_company.append(comp_entries)
         state["posted_ids"] = list(dict.fromkeys(
@@ -307,6 +318,20 @@ def drain(container):
     now = datetime.datetime.now(timezone.utc)
     if not _in_posting_window(now):
         return ["outside posting window (7:30a-7p ET) — holding queue"]
+    # hard daily cap (LinkedIn allows 150 posts/member/day)
+    try:
+        plog = _load(container, "li_post_log.json", [])
+        today = now.date().isoformat()
+        if sum(1 for p in plog if str(p.get("ts", "")).startswith(today)) >= DAILY_CAP:
+            return [f"daily cap {DAILY_CAP} reached — resuming tomorrow"]
+    except Exception:
+        pass
+    # prune stale cards so a backlog never posts days-old roles
+    q0 = _load(container, QUEUE_BLOB, [])
+    cutoff_iso = (now - timedelta(hours=STALE_HOURS)).isoformat()
+    q1 = [e for e in q0 if not e.get("created") or e["created"] >= cutoff_iso]
+    if len(q1) != len(q0):
+        _save(container, QUEUE_BLOB, q1)
     if _cfg("linkedin_autopost_enabled", "false").lower() != "true":
         return ["autopost disabled"]
     now = datetime.datetime.now(timezone.utc)
