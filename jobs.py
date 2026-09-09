@@ -126,12 +126,16 @@ def daily_poll():
     return growth_posts.daily_poll(store)
 
 
-def daily_roundup():
-    """One PDF carousel a day: highest-paying roles of the week."""
+def daily_roundup(slot="noon"):
+    """PDF carousel for the slot; theme from growth_posts.ROTATION (weekday x slot)."""
     store = posts_store()
     if not strategy.policy(store)["carousel"]:
         return ["carousel off in this strategy arm"]
-    return growth_posts.daily_roundup(store, logo_loader)
+    return growth_posts.daily_roundup(store, logo_loader, slot)
+
+
+def daily_roundup_pm():
+    return daily_roundup("evening")
 
 
 def strategy_summary():
@@ -176,7 +180,8 @@ SCHEDULE = [
     ("growth_poll","*/20 * * * *",    growth_poll),                 # read replies / chat
     ("health_report", "30 13 * * *",  health_report),               # 9:30 AM ET watchdog email
     ("daily_poll", "32 12 * * *",     daily_poll),                  # 8:32 AM ET LinkedIn poll
-    ("daily_roundup", "12 16 * * *",  daily_roundup),               # 12:12 PM ET PDF carousel
+    ("daily_roundup", "12 16 * * *",  daily_roundup),               # 12:12 PM ET PDF carousel (noon theme)
+    ("daily_roundup_pm", "12 21 * * *", daily_roundup_pm),          # 5:12 PM ET PDF carousel (evening theme)
 ]
 
 

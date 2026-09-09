@@ -311,12 +311,6 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
                     j["salary"] = det["salary"]
             except Exception:
                 pass
-        try:
-            import growth_posts
-            growth_posts.record_facts(container, company, chunk, _job_loc,
-                                      _job_url)
-        except Exception:
-            pass
         card_blob = f"{CARDS_PREFIX}{company}_logo.png"
         try:
             container.download_blob(card_blob).readall()   # exists — reuse
@@ -334,6 +328,13 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
             "created": now.isoformat(),
         })
     per_company.append(comp_entries)
+    # pay facts for the carousels/polls: every fetched job that shows a range
+    # (chunk jobs carry the detail-fetched salary, boards often list it upfront)
+    try:
+        import growth_posts
+        growth_posts.record_facts(container, company, fresh, _job_loc, _job_url)
+    except Exception:
+        pass
     state["posted_ids"] = list(dict.fromkeys(
         list(posted) + [str(j.get("id")) for j in fresh]))[-8000:]
     state["last_run"] = now.isoformat()

@@ -152,7 +152,7 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 11  # 5 gen + drain + growth ask/poll + health + poll + carousel
+    assert src.count("timer_trigger") == 12  # 5 gen + drain + growth ask/poll + health + poll + 2 carousels
     assert '"0 12 * * *"' in src and '"20 12 * * *"' in src and '"30 12 * * *"' in src
     assert '"5-55/10 * * * *"' in src         # drain every 10 min, offset from generates
     assert '"0 11 * * *"' not in src           # no email timers
@@ -595,3 +595,44 @@ def test_schedule_has_growth_formats():
     import jobs
     names = {n for n, _, _ in jobs.SCHEDULE}
     assert {"daily_poll", "daily_roundup"} <= names
+
+
+def test_deck_themes_select_rank_and_render(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage, growth_posts as gp, json
+    s = storage.get_store("linkedin-posts")
+    now = datetime.datetime.now(timezone.utc).isoformat()
+    rows = [("openai", "Research Engineer, Training", "San Francisco", 530000),
+            ("openai", "Software Engineer, Infra", "Remote - US", 400000),
+            ("anthropic", "Staff Software Engineer", "Remote-Friendly", 650000),
+            ("anthropic", "Software Engineer, Agents", "New York, NY", 480000),
+            ("microsoft", "Principal Software Engineer", "Redmond, Washington", 274800),
+            ("microsoft", "Software Engineer II", "Remote", 180000),
+            ("google", "Senior Software Engineer, ML", "Sunnyvale, CA, USA", 340000),
+            ("stripe", "Engineering Manager, Payments", "Seattle, WA", 420000),
+            ("nvidia", "Distinguished Engineer", "Santa Clara, CA", 488000),
+            ("ramp", "Director, Strategic Finance", "New York", 385000)]
+    s.upload_blob("li_jobfacts.json", json.dumps([
+        {"ts": now, "company": c, "title": t, "loc": l, "salary": f"${p - 100000:,} - ${p:,}", "top": p, "url": f"https://x/{i}"}
+        for i, (c, t, l, p) in enumerate(rows)]))
+    assert [f["top"] for f in gp.select(s, "top_pay")][:3] == [650000, 530000, 488000]
+    assert all(gp._RX["remote"].search(f["loc"]) for f in gp.select(s, "remote"))
+    assert gp.select(s, "spotlight", company="openai") and all(f["company"] == "openai" for f in gp.select(s, "spotlight", company="openai"))
+    rank = gp.rank_companies(s)
+    assert rank[0][0] == "anthropic" and rank[0][1] == 650000 and len(rank) >= 6
+    for theme in ("top_pay", "remote", "swe_leaderboard"):
+        items = rank if theme == "swe_leaderboard" else gp.select(s, theme)
+        pdf = gp.build_deck(theme, items, None)
+        assert pdf[:4] == b"%PDF"
+        text = gp.deck_commentary(theme, items)
+        assert "Follow me" in text and "{hashtag|\\#|TechJobs}" in text and "http" not in text
+    spot = gp.deck_commentary("spotlight", gp.select(s, "spotlight", company="openai"), company="openai")
+    assert "@[OpenAI](urn:li:organization:11130470)" in spot
+    # rotation: every weekday x slot resolves to a theme with enough data (falls back if needed)
+    s.upload_blob("li_post_log.json", json.dumps([]))
+    for slot in ("noon", "evening"):
+        theme, items, company = gp.plan_deck(s, slot)
+        assert theme in gp.THEMES and (len(items) >= 5 or gp.THEMES[theme]["kind"] == "ranking")
+    # a theme posted today is not repeated in the other slot
+    s.upload_blob("li_post_log.json", json.dumps([{"ts": now, "variant": "carousel", "theme": "top_pay"}]))
+    assert gp.plan_deck(s, "noon")[0] != "top_pay"

@@ -13,11 +13,16 @@ Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
 ## Growth engine (goal: +200 followers/day)
 
 Every post carries a **follow CTA** and a verified **@company tag**. On top of the
-job cards, two native high-reach formats go out daily through the versioned
-Posts API: a **poll** at 8:32 AM ET (company-vs-company with real pay numbers,
-alternating with career questions) and a **PDF carousel** at 12:12 PM ET ("10
-highest-paying tech jobs posted this week", built from the pay ranges the
-generator saw). Neither contains an outbound link.
+job cards, native high-reach formats go out daily through the versioned Posts
+API, none with an outbound link: a **poll** at 8:32 AM ET (company-vs-company
+with real pay numbers, alternating with career questions) and **two PDF
+carousels** (12:12 PM and 5:12 PM ET) built from the pay ranges the generator
+records (`li_jobfacts.json`). Carousel themes rotate by weekday
+(`growth_posts.ROTATION`): 10 highest-paying jobs · remote $200K+ · AI & ML ·
+company spotlight · the $400K+ Staff/Principal club · Bay Area / Seattle / NYC ·
+early-career · engineering leadership · "who pays the most for a Software
+Engineer" leaderboard · weekly recap. A theme that lacks data falls back to the
+next one; roles already featured aren't repeated.
 
 Strategies are tested as **arms** in 3-day blocks (`strategy.py`): `volume`
 (1 post / 10 min, 24/7) vs `prime` (1 post / 30 min, 7am–9pm ET). The follower
@@ -84,7 +89,7 @@ python worker.py                # scheduler + /health on $PORT
 
 ```bash
 pip install -r requirements.txt pytest
-python -m pytest tests/ -v      # 49 tests: parsers, dedup, schedule parity, storage, cron, strategy, LTF
+python -m pytest tests/ -v      # 50 tests: parsers, dedup, schedule parity, storage, cron, strategy, LTF
 ```
 
 ## Notes

@@ -199,29 +199,6 @@ def _remember_featured(store, items):
     store.upload_blob(CAROUSEL_STATE, json.dumps(st), overwrite=True)
 
 
-def top_paid(store, days=7, n=10, per_company=2, exclude=None):
-    """Highest-paying roles of the last `days` days, at most `per_company` each,
-    skipping `exclude` urls (roles already featured) when enough remain."""
-    facts = _load(store, FACTS_BLOB, [])
-    cutoff = (datetime.datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    recent = [f for f in facts if f.get("ts", "") >= cutoff and f.get("top")]
-    if exclude:
-        fresh = [f for f in recent if f.get("url") not in exclude]
-        if len(fresh) >= 5:
-            recent = fresh
-    recent.sort(key=lambda f: -f["top"])
-    out, count = [], {}
-    for f in recent:
-        c = f["company"]
-        if count.get(c, 0) >= per_company:
-            continue
-        count[c] = count.get(c, 0) + 1
-        out.append(f)
-        if len(out) >= n:
-            break
-    return out
-
-
 def company_tops(store, days=7):
     """{company: (top_pay, title)} over the window — feeds the poll numbers."""
     best = {}
@@ -255,6 +232,148 @@ GREEN = (10, 125, 60)
 INK = (17, 24, 39)
 GRAY = (107, 114, 128)
 LIGHT = (243, 244, 246)
+
+# ---- theme catalog: the same deck engine, different lenses on the pay data ----
+
+_RX = {
+    "remote":  re.compile(r"remote|anywhere|work from home", re.I),
+    "ai":      re.compile(r"\b(AI|ML|machine learning|research|LLM|deep learning|applied scien|data scien|"
+                          r"genai|agent|inference|training|model)", re.I),
+    "staff":   re.compile(r"\b(staff|principal|distinguished|fellow|architect)\b", re.I),
+    "leader":  re.compile(r"\b(manager|director|head of|vp|vice president|lead)\b", re.I),
+    "early":   re.compile(r"new grad|early career|entry|junior|associate|intern|university|"
+                          r"engineer i\b|engineer 1\b|engineer ii\b|engineer 2\b|\bI\b|\bII\b", re.I),
+    "swe":     re.compile(r"software (engineer|development)|\bSWE\b|\bSDE\b|engineer", re.I),
+    "bay":     re.compile(r"san francisco|bay area|sunnyvale|mountain view|palo alto|menlo park|cupertino|"
+                          r"santa clara|san jose|redwood|oakland|fremont|san mateo|\bSF\b", re.I),
+    "seattle": re.compile(r"seattle|redmond|bellevue|kirkland|washington", re.I),
+    "nyc":     re.compile(r"new york|nyc|manhattan|brooklyn", re.I),
+}
+
+BASE_TAGS = ("TechJobs", "Hiring", "Salary", "JobSearch")
+
+
+def _T(title, sub, hook, filt=None, per_company=2, min_pay=0, days=7, tags=(), kind="jobs",
+       allow_repeats=False):
+    return {"title": title, "sub": sub, "hook": hook, "filt": filt, "per_company": per_company,
+            "min_pay": min_pay, "days": days, "tags": tags, "kind": kind, "allow_repeats": allow_repeats}
+
+
+THEMES = {
+    "top_pay":   _T("10 highest-paying tech jobs posted this week", "with salary ranges",
+                    "\U0001F4B0 The {n} highest-paying tech roles posted this week — with the pay ranges. Swipe \U0001F449"),
+    "remote":    _T("Remote tech jobs paying $200K+ posted this week", "work from anywhere in the US",
+                    "\U0001F3E0 {n} remote roles paying $200K+ posted this week — pay ranges inside. Swipe \U0001F449",
+                    filt=lambda f: _RX["remote"].search(f["loc"]), per_company=3, min_pay=200000, tags=("RemoteJobs", "RemoteWork")),
+    "ai_ml":     _T("The highest-paying AI & ML jobs posted this week", "research · LLMs · applied ML",
+                    "\U0001F916 The {n} highest-paying AI & ML roles posted this week — with pay. Swipe \U0001F449",
+                    filt=lambda f: _RX["ai"].search(f["title"]), tags=("AI", "MachineLearning", "AIJobs")),
+    "staff_plus": _T("The $400K+ club: Staff, Principal & Distinguished roles this week", "senior IC roles, pay ranges inside",
+                    "\U0001F3C6 Staff, Principal and Distinguished roles posted this week — {n} of them at $400K+. Swipe \U0001F449",
+                    filt=lambda f: _RX["staff"].search(f["title"]), min_pay=400000, tags=("StaffEngineer", "Leadership")),
+    "leaders":   _T("Engineering leadership roles posted this week — with pay", "managers · directors · heads of",
+                    "\U0001F4C8 {n} engineering leadership roles posted this week — with the pay ranges. Swipe \U0001F449",
+                    filt=lambda f: _RX["leader"].search(f["title"]), tags=("EngineeringManager", "Leadership")),
+    "bay_area":  _T("Bay Area tech jobs paying $250K+ posted this week", "San Francisco · South Bay · Peninsula",
+                    "\U0001F309 {n} Bay Area roles paying $250K+ posted this week — pay ranges inside. Swipe \U0001F449",
+                    filt=lambda f: _RX["bay"].search(f["loc"]), min_pay=250000, tags=("BayArea", "SanFrancisco")),
+    "seattle":   _T("Seattle-area tech jobs posted this week — with pay", "Seattle · Redmond · Bellevue",
+                    "☔ {n} Seattle-area roles posted this week — with the pay ranges. Swipe \U0001F449",
+                    filt=lambda f: _RX["seattle"].search(f["loc"]), per_company=3, tags=("Seattle", "SeattleJobs")),
+    "nyc":       _T("New York tech jobs posted this week — with pay", "NYC roles, pay ranges inside",
+                    "\U0001F5FD {n} New York tech roles posted this week — with the pay ranges. Swipe \U0001F449",
+                    filt=lambda f: _RX["nyc"].search(f["loc"]), per_company=3, tags=("NYC", "NewYorkJobs")),
+    "early":     _T("Early-career tech jobs at big tech — with pay", "new grad · junior · level I/II",
+                    "\U0001F331 {n} early-career roles at top tech companies — with the pay ranges. Swipe \U0001F449",
+                    filt=lambda f: _RX["early"].search(f["title"]) and not _RX["staff"].search(f["title"]),
+                    per_company=3, tags=("NewGrad", "EarlyCareer")),
+    "spotlight": _T("New at {company}: roles posted this week, with pay", "one company, every pay range",
+                    "\U0001F50E {company} just posted {n} roles — every pay range in one deck. Swipe \U0001F449",
+                    per_company=10, tags=()),
+    "weekly":    _T("Weekly recap: the 10 best-paid roles posted this week", "the ones worth re-reading",
+                    "\U0001F4C5 Weekly recap — the {n} best-paid tech roles posted this week, with pay. Swipe \U0001F449",
+                    allow_repeats=True),
+    "swe_leaderboard": _T("Who pays the most for a Software Engineer?",
+                    "{n} companies ranked · top of the posted range",
+                    "\U0001F3C5 Who pays the most for a Software Engineer right now? Ranked from this week's postings \U0001F447",
+                    filt=lambda f: _RX["swe"].search(f["title"]), kind="ranking", tags=("SoftwareEngineer", "Compensation")),
+}
+
+# weekday (Mon=0) -> theme for the noon and the evening slot
+ROTATION = {
+    "noon":    ["top_pay", "ai_ml", "remote", "spotlight", "top_pay", "staff_plus", "weekly"],
+    "evening": ["bay_area", "spotlight", "swe_leaderboard", "seattle", "nyc", "early", "leaders"],
+}
+FALLBACK_ORDER = ["top_pay", "ai_ml", "staff_plus", "bay_area", "spotlight", "swe_leaderboard",
+                  "leaders", "seattle", "nyc", "remote", "early", "weekly"]
+SPOTLIGHT_ORDER = ["anthropic", "openai", "microsoft", "apple", "google", "nvidia", "netflix", "xai",
+                   "databricks", "stripe", "scaleai", "ramp", "amd", "meta", "amazon", "ibm", "cursor"]
+MIN_ITEMS = 5
+
+
+def _recent_facts(store, days):
+    cutoff = (datetime.datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return [f for f in _load(store, FACTS_BLOB, []) if f.get("ts", "") >= cutoff and f.get("top")]
+
+
+def select(store, theme, company=None, exclude=None, n=10):
+    """Items for a jobs-deck theme: filter → pay floor → fresh-only (if enough) →
+    sort by pay → cap per company → top n."""
+    t = THEMES[theme]
+    items = _recent_facts(store, t["days"])
+    if company:
+        items = [f for f in items if f["company"] == company]
+    if t["filt"]:
+        items = [f for f in items if t["filt"](f)]
+    if t["min_pay"]:
+        paid = [f for f in items if f["top"] >= t["min_pay"]]
+        if len(paid) >= MIN_ITEMS:
+            items = paid
+    if exclude and not t["allow_repeats"]:
+        fresh = [f for f in items if f.get("url") not in exclude]
+        if len(fresh) >= MIN_ITEMS:
+            items = fresh
+    items.sort(key=lambda f: -f["top"])
+    out, count = [], {}
+    for f in items:
+        c = f["company"]
+        if count.get(c, 0) >= t["per_company"]:
+            continue
+        count[c] = count.get(c, 0) + 1
+        out.append(f)
+        if len(out) >= n:
+            break
+    return out
+
+
+def rank_companies(store, theme="swe_leaderboard", n=10):
+    """[(company, top_pay, title)] — best posted pay per company for the theme's filter."""
+    t = THEMES[theme]
+    best = {}
+    for f in _recent_facts(store, t["days"]):
+        if t["filt"] and not t["filt"](f):
+            continue
+        if f["top"] > best.get(f["company"], (0, ""))[0]:
+            best[f["company"]] = (f["top"], f["title"])
+    return sorted(((c, v[0], v[1]) for c, v in best.items()), key=lambda x: -x[1])[:n]
+
+
+def spotlight_company(store, day_index):
+    """Rotate through favourites first; only companies with enough paid roles this week."""
+    for k in range(len(SPOTLIGHT_ORDER)):
+        c = SPOTLIGHT_ORDER[(day_index + k) % len(SPOTLIGHT_ORDER)]
+        if len(select(store, "spotlight", company=c)) >= MIN_ITEMS:
+            return c
+    return None
+
+
+def top_paid(store, days=7, n=10, per_company=2, exclude=None):
+    """Backwards-compatible alias: the plain highest-paying list."""
+    THEMES["top_pay"]["days"], THEMES["top_pay"]["per_company"] = days, per_company
+    try:
+        return select(store, "top_pay", exclude=exclude, n=n)
+    finally:
+        THEMES["top_pay"]["days"], THEMES["top_pay"]["per_company"] = 7, 2
 
 
 def _font(size, weight="Bold"):
@@ -304,17 +423,22 @@ def _logo_img(company, logo_loader, max_w=380, max_h=110):
         return None
 
 
-def _cover(date_str, n, companies):
+def _cover(title, sub, meta):
     from PIL import Image, ImageDraw
     im = Image.new("RGB", (PW, PH), NAVY)
     d = ImageDraw.Draw(im)
     d.rectangle([0, 0, 28, PH], fill=GREEN)
-    y = 250
-    for line in [f"{n} highest-paying", "tech jobs posted", "this week"]:
-        d.text((90, y), line, font=_font(92), fill="white")
-        y += 112
-    d.text((90, y + 30), "with salary ranges", font=_font(56), fill=(134, 239, 172))
-    d.text((90, y + 130), f"{len(companies)} companies · {date_str}", font=_font(36, "Medium"), fill=(203, 213, 225))
+    size = 92 if len(title) <= 40 else 80
+    lines = _wrap(d, title, _font(size), PW - 180, 4)
+    y = 230 if len(lines) <= 3 else 190
+    for line in lines:
+        d.text((90, y), line, font=_font(size), fill="white")
+        y += int(size * 1.22)
+    fs = 52
+    while fs > 30 and d.textlength(sub, font=_font(fs)) > PW - 180:
+        fs -= 4                                            # auto-fit the subtitle
+    d.text((90, y + 30), sub, font=_font(fs), fill=(134, 239, 172))
+    d.text((90, y + 120), meta, font=_font(36, "Medium"), fill=(203, 213, 225))
     d.text((90, PH - 200), "swipe »", font=_font(48), fill="white")
     d.text((90, PH - 120), "new roles with pay, posted daily · follow for the feed",
            font=_font(30, "Regular"), fill=(148, 163, 184))
@@ -327,40 +451,70 @@ def _job_page(i, n, f, logo_loader):
     im = Image.new("RGB", (PW, PH), "white")
     d = ImageDraw.Draw(im)
     d.rectangle([0, 0, PW, 16], fill=GREEN)
-    # rank badge
     d.ellipse([80, 90, 200, 210], fill=NAVY)
     rank = f"#{i}"
     fb = _font(52)
     tw = d.textlength(rank, font=fb)
     d.text((140 - tw / 2, 116), rank, font=fb, fill="white")
-    # logo or name
     lg = _logo_img(f["company"], logo_loader)
     if lg is not None:
         im.paste(lg, (240, 150 - lg.height // 2), lg if lg.mode == "RGBA" else None)
     else:
         d.text((240, 110), card_builder.display_name(f["company"]), font=_font(60), fill=INK)
-    # pay
     d.text((80, 330), "PAY RANGE", font=_font(30, "Medium"), fill=GRAY)
     money = f["salary"] or _money(f["top"])
     fm = _font(84 if len(money) <= 20 else 64)
     d.text((80, 370), money, font=fm, fill=GREEN)
-    # title
     y = 520
     for line in _wrap(d, f["title"], _font(62), PW - 160, 3):
         d.text((80, y), line, font=_font(62), fill=INK)
         y += 78
-    # meta
     y += 20
     d.text((80, y), f"{card_builder.display_name(f['company'])}  •  {_short_loc(f['loc'])}",
            font=_font(34, "Medium"), fill=GRAY)
     y += 60
     d.text((80, y), "posted this week", font=_font(34, "Medium"), fill=GRAY)
-    # apply box
     d.rounded_rectangle([80, PH - 330, PW - 80, PH - 190], radius=24, fill=LIGHT)
     d.text((110, PH - 305), "How to apply", font=_font(30, "Medium"), fill=GRAY)
     site = CAREERS_SITE.get(f["company"]) or re.sub(r"^https?://(www\.)?", "", f.get("url", "")).split("/")[0] or "company careers page"
     d.text((110, PH - 262), f"{site} — search the title", font=_font(38), fill=INK)
     d.text((80, PH - 120), f"{i} / {n}   ·   swipe »", font=_font(30, "Medium"), fill=GRAY)
+    return im
+
+
+def _ranking_page(rows, logo_loader, heading):
+    """One page: rank · logo · company · bar · top pay (rows = [(company, top, title)])."""
+    from PIL import Image, ImageDraw
+    import card_builder
+    im = Image.new("RGB", (PW, PH), "white")
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, PW, 16], fill=GREEN)
+    y = 70
+    for line in _wrap(d, heading, _font(50), PW - 160, 2):
+        d.text((80, y), line, font=_font(50), fill=INK)
+        y += 62
+    d.text((80, y + 6), "top of the posted pay range · this week's postings", font=_font(28, "Medium"), fill=GRAY)
+    y += 70
+    top = rows[0][1] if rows else 1
+    row_h = min(96, int((PH - y - 120) / max(len(rows), 1)))
+    bar_x0, bar_x1 = 470, PW - 80
+    for i, (c, pay, _title) in enumerate(rows, 1):
+        cy = y + (i - 1) * row_h
+        d.text((80, cy + 22), f"{i}", font=_font(34), fill=GRAY if i > 3 else GREEN)
+        lg = _logo_img(c, logo_loader, max_w=84, max_h=44)
+        if lg is not None:
+            im.paste(lg, (135 + (84 - lg.width) // 2, cy + 18 + (44 - lg.height) // 2),
+                     lg if lg.mode == "RGBA" else None)
+        d.text((240, cy + 24), card_builder.display_name(c), font=_font(28, "Medium"), fill=INK)
+        w = int((bar_x1 - bar_x0) * pay / top)
+        d.rounded_rectangle([bar_x0, cy + 22, bar_x0 + max(w, 8), cy + 62], radius=10,
+                            fill=GREEN if i <= 3 else (52, 105, 170))
+        label = _money(pay)
+        lw = d.textlength(label, font=_font(30))
+        lx = bar_x0 + w + 14 if bar_x0 + w + 14 + lw <= bar_x1 else bar_x0 + w - lw - 14
+        d.text((lx, cy + 25), label, font=_font(30), fill=INK if lx > bar_x0 + w else "white")
+    d.text((80, PH - 120), "pay shown = top of the range in the highest-paying SWE posting  ·  swipe »",
+           font=_font(26, "Medium"), fill=GRAY)
     return im
 
 
@@ -384,19 +538,73 @@ def _last_page():
     return im
 
 
-def build_roundup_pdf(items, logo_loader=None, date_str=None):
-    date_str = date_str or datetime.datetime.now().strftime("%b %d, %Y")
-    companies = sorted({f["company"] for f in items})
-    pages = [_cover(date_str, len(items), companies)]
-    for i, f in enumerate(items, 1):
-        pages.append(_job_page(i, len(items), f, logo_loader))
-    pages.append(_last_page())
+def _pdf(pages):
     buf = io.BytesIO()
     pages[0].save(buf, format="PDF", save_all=True, append_images=pages[1:], resolution=96.0)
     return buf.getvalue()
 
 
-# ---------- the two daily jobs ----------
+def build_deck(theme, items, logo_loader=None, date_str=None, company=None):
+    """Jobs deck (cover + one page per role + follow page) or ranking deck."""
+    import card_builder
+    t = THEMES[theme]
+    date_str = date_str or datetime.datetime.now().strftime("%b %d, %Y")
+    cname = card_builder.display_name(company) if company else ""
+    title = t["title"].format(company=cname)
+    if t["kind"] == "ranking":
+        pages = [_cover(title, t["sub"].format(n=len(items)), f"this week's postings · {date_str}"),
+                 _ranking_page(items, logo_loader, "Highest pay offered for a Software Engineer"),
+                 _last_page()]
+        return _pdf(pages)
+    companies = {f["company"] for f in items}
+    meta = f"{len(items)} roles · {date_str}" if company else f"{len(items)} roles · {len(companies)} companies · {date_str}"
+    pages = [_cover(title, t["sub"].format(n=len(items)), meta)]
+    for i, f in enumerate(items, 1):
+        pages.append(_job_page(i, len(items), f, logo_loader))
+    pages.append(_last_page())
+    return _pdf(pages)
+
+
+def build_roundup_pdf(items, logo_loader=None, date_str=None):
+    """Backwards-compatible: the plain highest-paying deck."""
+    return build_deck("top_pay", items, logo_loader, date_str)
+
+
+def deck_commentary(theme, items, company=None):
+    """LTF commentary: hook, #1 (or podium), @mentions, follow CTA, hashtags. No links."""
+    import card_builder
+    display, urns = _names_and_urns()
+    t = THEMES[theme]
+    cname = display(company) if company else ""
+    hook = t["hook"].format(n=len(items), company=cname)
+    lines = [ltf(hook), ""]
+    if t["kind"] == "ranking":
+        medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
+        for m, (c, pay, title) in zip(medals, items[:3]):
+            lines.append(ltf(m + " ") + (ltf_mention(display(c), urns[c]) if urns.get(c) else ltf(display(c)))
+                         + ltf(f" — up to {_money(pay)} ({title[:40]})"))
+        lines.append("")
+        lines.append(ltf(f"Full top {len(items)} in the slides. Which number surprised you?"))
+    else:
+        lead = items[0]
+        lines.append(ltf(f"#1: {lead['title']} at {display(lead['company'])} — {lead['salary'] or _money(lead['top'])}"))
+        comps = []
+        for f in items:
+            if f["company"] not in comps:
+                comps.append(f["company"])
+        if company:
+            lines.append(ltf("All roles at ") + (ltf_mention(display(company), urns[company]) if urns.get(company) else ltf(display(company))))
+        else:
+            lines.append(ltf("Inside: ") + " ".join(ltf_mention(display(c), urns[c]) if urns.get(c) else ltf(display(c))
+                                                     for c in comps[:6]))
+    lines += ["", ltf(FOLLOW_CTA),
+              ltf("♻️ Repost so someone in your network sees it."),
+              ltf("\U0001F4AC Which one would you take? \U0001F447"), "",
+              " ".join(ltf_tag(x) for x in tuple(t["tags"]) + BASE_TAGS)]
+    return "\n".join(lines)
+
+
+# ---------- the daily jobs ----------
 
 def _guard(store):
     import linkedin_autopost as la
@@ -419,10 +627,14 @@ def _log_post(store, variant, urn, company="multi", extra=None):
     store.upload_blob(POST_LOG, json.dumps(plog[-2000:]), overwrite=True)
 
 
-def _already_today(store, variant):
+def _today_posts(store, variant):
     today = datetime.datetime.now(timezone.utc).date().isoformat()
-    return any(p.get("variant") == variant and str(p.get("ts", "")).startswith(today)
-               for p in _load(store, POST_LOG, []))
+    return [p for p in _load(store, POST_LOG, [])
+            if p.get("variant") == variant and str(p.get("ts", "")).startswith(today)]
+
+
+def _already_today(store, variant):
+    return bool(_today_posts(store, variant))
 
 
 def _names_and_urns():
@@ -430,39 +642,59 @@ def _names_and_urns():
     return card_builder.display_name, la.ORG_URNS
 
 
-def daily_roundup(store, logo_loader=None):
+def _day_index(now=None):
+    return max((datetime.date.today() - datetime.date(2026, 9, 9)).days, 0)
+
+
+def plan_deck(store, slot="noon", now=None):
+    """Pick today's theme for a slot: the rotation entry, else the first
+    fallback with enough data that hasn't been posted today.
+    Returns (theme, items, company) or (None, [], None)."""
+    weekday = datetime.date.today().weekday()
+    done = {p.get("theme") for p in _today_posts(store, "carousel")}
+    exclude = _featured(store)
+    order = [ROTATION[slot][weekday]] + [t for t in FALLBACK_ORDER if t != ROTATION[slot][weekday]]
+    for theme in order:
+        if theme in done:
+            continue
+        t = THEMES[theme]
+        company = None
+        if theme == "spotlight":
+            company = spotlight_company(store, _day_index() + (weekday if slot == "evening" else 0))
+            if not company:
+                continue
+        if t["kind"] == "ranking":
+            items = rank_companies(store, theme)
+            if len(items) >= 6:
+                return theme, items, None
+            continue
+        items = select(store, theme, company=company, exclude=exclude)
+        if len(items) >= MIN_ITEMS:
+            return theme, items, company
+    return None, [], None
+
+
+def daily_roundup(store, logo_loader=None, slot="noon"):
+    """One PDF carousel for the slot (noon / evening ET), theme from the rotation."""
     why = _guard(store)
     if why:
-        return [f"roundup skipped: {why}"]
-    if _already_today(store, "carousel"):
-        return ["roundup already posted today"]
-    items = top_paid(store, exclude=_featured(store))
-    if len(items) < 5:
-        return [f"roundup skipped: only {len(items)} paid roles on record"]
-    import linkedin_client
-    display, urns = _names_and_urns()
+        return [f"carousel skipped: {why}"]
+    if len(_today_posts(store, "carousel")) >= 2:
+        return ["carousel skipped: 2 already posted today"]
+    theme, items, company = plan_deck(store, slot)
+    if not theme:
+        return ["carousel skipped: no theme has enough roles yet"]
+    import linkedin_client, card_builder
     token = linkedin_client._token()
     author = linkedin_client.person_urn(token)
-    pdf = build_roundup_pdf(items, logo_loader)
-    lead = items[0]
-    companies = []
-    for f in items:
-        if f["company"] not in companies:
-            companies.append(f["company"])
-    tags = " ".join(ltf_mention(display(c), urns[c]) if urns.get(c) else ltf(display(c))
-                    for c in companies[:6])
-    commentary = (
-        ltf(f"\U0001F4B0 The {len(items)} highest-paying tech roles posted this week — with the pay ranges. Swipe \U0001F449")
-        + "\n\n" + ltf("#1: ") + ltf(f"{lead['title']} at {display(lead['company'])} — {lead['salary'] or _money(lead['top'])}")
-        + "\n\n" + ltf("Inside: ") + tags
-        + "\n\n" + ltf(FOLLOW_CTA)
-        + "\n" + ltf("♻️ Repost so someone in your network sees it.")
-        + "\n" + ltf("\U0001F4AC Which one would you take? \U0001F447")
-        + "\n\n" + " ".join(ltf_tag(t) for t in ("TechJobs", "Hiring", "Salary", "JobSearch", "Careers")))
-    urn = post_document(pdf, f"{len(items)} highest-paying tech jobs this week", commentary, token, author)
-    _log_post(store, "carousel", urn, extra={"items": len(items)})
-    _remember_featured(store, items)
-    return [f"roundup posted {urn} ({len(items)} roles, {len(pdf) // 1024} KB)"]
+    pdf = build_deck(theme, items, logo_loader, company=company)
+    title = THEMES[theme]["title"].format(company=card_builder.display_name(company) if company else "")
+    urn = post_document(pdf, title, deck_commentary(theme, items, company), token, author)
+    _log_post(store, "carousel", urn, company=company or "multi",
+              extra={"theme": theme, "slot": slot, "items": len(items)})
+    if THEMES[theme]["kind"] == "jobs" and not THEMES[theme]["allow_repeats"]:
+        _remember_featured(store, items)
+    return [f"carousel posted {urn}: {theme}{' ' + company if company else ''} ({len(items)} items, {len(pdf) // 1024} KB)"]
 
 
 POLL_SETS = [
