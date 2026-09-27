@@ -519,7 +519,7 @@ def test_catchup_only_when_primary_slot_missed(tmp_path, monkeypatch):
         {"ts": (now - dt.timedelta(minutes=1)).isoformat(), "variant": "poll", "urn": "b"}]))
     assert not ran and "not needed" in jobs.drain_catchup()[0]
     s.upload_blob("li_post_log.json", json.dumps([
-        {"ts": (now - dt.timedelta(minutes=22)).isoformat(), "variant": "news", "urn": "a"},
+        {"ts": (now - dt.timedelta(minutes=13)).isoformat(), "variant": "news", "urn": "a"},
         {"ts": (now - dt.timedelta(minutes=2)).isoformat(), "variant": "carousel", "urn": "b"}]))  # extras don't count
     assert "missed" in jobs.drain_catchup()[0] and ran == [1]
 
@@ -675,6 +675,10 @@ def test_should_post_respects_window_and_spacing(tmp_path, monkeypatch):
     night_utc = datetime.datetime(2026, 9, 12, 6, 0, tzinfo=timezone.utc)       # 02:00 ET
     assert st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=31))[0]
     assert not st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=10))[0]
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
+    assert st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=7, seconds=30))[0]     # late previous post
+    assert not st.should_post(s, noon_utc, noon_utc - datetime.timedelta(minutes=5))[0]
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "prime"}))
     assert not st.should_post(s, night_utc, None)[0]
     s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
     assert st.should_post(s, night_utc, night_utc - datetime.timedelta(minutes=10))[0]

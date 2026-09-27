@@ -135,7 +135,7 @@ def should_post(store, now, last_post_ts):
             return False, f"{p['arm']}: outside {start}:00-{end}:00 ET window"
     if last_post_ts is not None:
         gap = (now - last_post_ts).total_seconds() / 60
-        if gap < p["spacing_min"] - 2:            # -2: timer jitter
+        if gap < p["spacing_min"] - 3:            # -3: timer jitter + a slow refill running late
             return False, f"{p['arm']}: last post {gap:.0f} min ago (< {p['spacing_min']})"
     return True, p["arm"]
 

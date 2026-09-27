@@ -175,7 +175,7 @@ def drain_catchup():
     plog = linkedin_autopost._load(store, "li_post_log.json", [])
     last = linkedin_autopost._last_post_ts(plog)
     now = datetime.datetime.now(timezone.utc)
-    if last and now - last < timedelta(minutes=15):
+    if last and now - last < timedelta(minutes=12):
         return [f"catch-up not needed (last card {int((now - last).total_seconds() // 60)} min ago)"]
     return ["catch-up: primary slot missed"] + drain()
 
