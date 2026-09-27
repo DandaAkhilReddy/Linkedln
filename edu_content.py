@@ -85,10 +85,93 @@ GUIDE = {
                "or 'boxes' (the method as a pipeline)."),
 }
 
-HOOK_RULES = ("The hook is the first line people see: <= 90 characters, specific, curiosity-driven, no "
-              "clickbait lies, no 'Google asked this' claims, no emojis. Good shapes: a surprising "
-              "consequence ('Your model was 94% accurate offline and useless in prod'), a sharp "
-              "either/or ('Token bucket or sliding window?'), a challenge ('Can you do it in O(n)?').")
+HOOK_RULES = ("The hook is the first line people see: <= 90 characters, specific to THIS question, "
+              "curiosity-driven, no clickbait lies, no 'Google asked this' claims, no emojis. "
+              "Use the hook shape you are given for this post and never reuse a hook from the avoid list.")
+
+# Hook shapes rotate per item so ten posts a day never sound alike.
+HOOK_SHAPES = [
+    "a bold claim that sounds wrong until you read the answer (e.g. 'The fastest solution here never sorts.')",
+    "a sharp either/or decision (e.g. 'Push-based feed or pull-based? One of them dies at 10M followers.')",
+    "a concrete failure story in one line (e.g. 'The retry looked harmless. It charged the customer twice.')",
+    "a number that makes people stop (e.g. '20 tokens per parameter. That one ratio changed how models are trained.')",
+    "a direct challenge with a constraint (e.g. 'O(n) time, O(1) space, one pass. Go.')",
+    "a 'most engineers get this wrong' framing with the specific mistake named",
+    "an interview-room framing without naming any company (e.g. '45 minutes, whiteboard, this question.')",
+    "a plain, confident statement of what the reader will be able to do after reading",
+]
+
+# Topic banks: one topic is assigned per post, rotating through the bank and
+# skipping anything used in the last few days, so a day's ten posts are ten
+# different subjects.
+TOPICS = {
+    "dsa": [
+        "two pointers on a sorted array", "sliding window with a variable size", "prefix sums + hash map (subarray sum = K)",
+        "binary search on the answer (e.g. minimum capacity / Koko bananas)", "binary search in a rotated sorted array",
+        "monotonic stack (next greater element / daily temperatures)", "monotonic deque (sliding window maximum)",
+        "fast & slow pointers (cycle detection, middle of list)", "reverse a linked list iteratively and recursively",
+        "merge k sorted lists with a heap", "top-k frequent elements (heap vs bucket sort)", "kth largest element (quickselect)",
+        "BFS on a grid (shortest path, number of islands)", "DFS with backtracking (subsets / permutations / N-queens)",
+        "topological sort (course schedule) and cycle detection in a DAG", "union-find with path compression (connected components)",
+        "Dijkstra with a priority queue", "0/1 knapsack and its 1-D space optimisation", "longest increasing subsequence in O(n log n)",
+        "edit distance / LCS dynamic programming", "coin change (min coins vs number of ways)", "house robber / max non-adjacent sum",
+        "Kadane's maximum subarray and the max product variant", "intervals: merge, insert, minimum meeting rooms",
+        "trie: prefix search and word search II", "binary tree traversal without recursion (iterative inorder)",
+        "lowest common ancestor in a binary tree and in a BST", "validate a BST (the min/max bound trick)",
+        "serialize and deserialize a binary tree", "diameter / max path sum of a binary tree",
+        "bit manipulation (single number, counting bits, power of two)", "LRU cache (hash map + doubly linked list)",
+        "matrix rotation / spiral order in place", "string: longest palindromic substring (expand around centre)",
+        "string: anagram grouping and character counting tricks", "heap-based median of a data stream",
+        "two heaps / greedy scheduling (task scheduler)", "greedy with sorting (jump game, gas station)",
+        "Floyd's algorithm for the duplicate number", "cyclic sort (first missing positive)",
+    ],
+    "sd": [
+        "URL shortener: ID generation without collisions", "rate limiter: token bucket vs sliding window, distributed with Redis",
+        "news feed: fan-out on write vs read, celebrity problem", "idempotency keys for payments and retries",
+        "cache-aside vs write-through vs write-behind; cache stampede", "consistent hashing and rebalancing a cache cluster",
+        "database sharding: choosing a shard key, hot partitions", "read replicas and replication lag: read-your-writes",
+        "message queue vs event log (SQS/RabbitMQ vs Kafka): ordering and replay", "exactly-once processing: what it really means",
+        "outbox pattern and change data capture", "saga pattern for distributed transactions", "leader election and distributed locks (fencing tokens)",
+        "back-of-the-envelope estimation for a chat app", "WebSockets vs long polling vs SSE for real-time updates",
+        "designing a notification system with dedup and rate limits", "search autocomplete (trie + top-k, prefix caching)",
+        "designing a distributed unique ID (Snowflake)", "object storage for uploads: presigned URLs, multipart, CDN",
+        "designing a job scheduler / delayed queue", "API gateway responsibilities: auth, throttling, routing, retries",
+        "circuit breakers, timeouts and retries with jitter", "bloom filters: where they save a database round trip",
+        "time-series metrics store: downsampling and retention", "geo search (geohash / quadtree) for nearby drivers",
+        "designing a ticket booking system: overselling and locks", "multi-region active-active: conflicts and CRDTs",
+        "blue/green vs canary deployments and feature flags", "designing a web crawler: politeness, dedup, frontier",
+        "log aggregation pipeline: sampling, indexing, cost", "CAP/PACELC in practice: what a system actually gives up",
+        "designing a leaderboard with Redis sorted sets", "designing a key-value store: LSM trees vs B-trees",
+        "hot key problem and request coalescing", "designing rate-limited webhooks with retries and signatures",
+    ],
+    "mlsd": [
+        "training/serving skew and feature stores", "two-tower retrieval + ranking for recommendations", "offline metrics vs online A/B; interleaving",
+        "data drift vs concept drift monitoring", "class imbalance: metrics and thresholds for fraud", "embedding-based search: ANN indexes (HNSW/IVF) trade-offs",
+        "batch vs real-time inference: latency and cost", "model registry, versioning and rollback", "labeling pipelines and active learning",
+        "feature engineering for time series without leakage", "point-in-time correct training data", "cold start in recommender systems",
+        "position bias and counterfactual evaluation", "shadow deployment and canary for models", "multi-armed bandits for ranking exploration",
+        "calibration and why probabilities matter for decisions", "model serving: GPU batching, dynamic batching, autoscaling",
+        "retraining cadence and champion/challenger", "guarding against feedback loops in ranking", "privacy: differential privacy and federated learning basics",
+        "designing an ML platform: what to standardise first", "evaluation datasets: slices, not averages", "handling delayed labels (conversions arrive days later)",
+        "search ranking: learning to rank features and losses", "ads CTR prediction system components", "anomaly detection system for metrics",
+        "forecasting system: hierarchical reconciliation", "LLM-based features vs classic features: cost and drift",
+        "vector database vs search engine for retrieval", "monitoring embeddings drift",
+    ],
+    "ai": [
+        "agent loop as a state graph with a bounded back-edge (LangGraph style)", "routers and conditional edges in agent graphs",
+        "tool calling: schema design and validation retries", "structured outputs: JSON schema mode + validation",
+        "RAG chunking strategies and contextual chunk headers", "hybrid search (BM25 + dense) and reranking", "evals: golden sets and LLM-as-judge pitfalls",
+        "guardrails: input/output checks, prompt injection defence", "prompt caching vs KV caching: what each saves",
+        "agent memory: short-term state vs long-term retrieval", "MCP servers: tools, resources, prompts; when to use MCP over REST",
+        "multi-agent handoffs vs a single agent with tools", "streaming responses and partial tool results", "fallback chains across models and providers",
+        "cost and latency budgets per request; token accounting", "human-in-the-loop checkpoints in agent graphs", "idempotent tools and side-effect safety for agents",
+        "observability for LLM apps: traces, spans, prompt versions", "semantic caching of responses", "context window management: summarisation vs retrieval",
+        "reflection / self-critique loops: when they help", "planning: ReAct vs plan-and-execute", "batch inference pipelines with LLMs",
+        "fine-tuning vs prompting vs RAG decision", "embedding model selection and dimensionality", "asynchronous tool execution and parallel tool calls",
+        "sandboxing code execution for agents", "rate limits and backoff for LLM APIs", "deterministic testing of non-deterministic models",
+        "designing a coding agent's edit-verify loop", "long-running agents: checkpoints and resumability",
+    ],
+}
 
 
 # ---------- storage helpers ----------
@@ -164,7 +247,7 @@ def validate(item, track):
             "options": opts, "answer": a[:1400], "code": code, "complexity": str(item.get("complexity") or "")[:120],
             "takeaway": str(item.get("takeaway") or "")[:180], "difficulty": diff, "visual": vis,
             "tags": tags, "url": str(item.get("url") or "")[:300], "source": str(item.get("source") or "")[:80],
-            "created": _now().isoformat()}
+            "topic": str(item.get("topic") or "")[:80], "created": _now().isoformat()}
 
 
 def seed_items(track):
@@ -239,12 +322,35 @@ def _paper_candidates(store, state):
     return out
 
 
-def generate_one(store, track, sec=None, state=None, paper=None):
+def pick_topic(track, state, pool_items=()):
+    """Next topic from the bank: skip topics used in the last 30 posts of the
+    track and anything already in today's pool; rotate by counter."""
+    bank = TOPICS.get(track) or []
+    if not bank:
+        return None
+    recent = {u.get("topic") for u in state.get("used", []) if u.get("track") == track}
+    recent |= {it.get("topic") for it in pool_items}
+    start = int((state.get("counters") or {}).get(track, 0))
+    for k in range(len(bank)):
+        t = bank[(start + k) % len(bank)]
+        if t not in recent:
+            return t
+    return bank[start % len(bank)]
+
+
+def pick_shape(state, track):
+    n = int((state.get("counters") or {}).get(track, 0))
+    return HOOK_SHAPES[n % len(HOOK_SHAPES)]
+
+
+def generate_one(store, track, sec=None, state=None, paper=None, topic=None, shape=None, avoid=()):
     """One LLM call → validated item (or None). Raises only if AOAI is not configured."""
     sec = sec if sec is not None else _cfg(store)
     state = state if state is not None else _load(store, STATE_BLOB, {"used": [], "papers_seen": []})
     style = str(sec.get("style_notes") or "").strip()
-    recent = _recent_titles(state, track)
+    recent = (_recent_titles(state, track) + [a for a in avoid if a])[-60:]
+    topic = topic or (pick_topic(track, state) if track != "papers" else None)
+    shape = shape or pick_shape(state, track)
     system = (
         "You write one LinkedIn post for software engineers: a question and its answer in the track "
         f"'{TRACK_NAMES[track]}'. Audience: engineers preparing for interviews and building real systems. "
@@ -265,7 +371,8 @@ def generate_one(store, track, sec=None, state=None, paper=None):
         "{kind:'compare', left:{title:'', points:['<=4']}, right:{title:'', points:['<=4']}} | "
         "{kind:'table', header:['','A','B'], rows:[['row','x','y']]} | {kind:'none'}).\n"
         "The visual must illustrate THIS question (the example array, the flow, the loop, the number).\n"
-        + (f"Do not repeat these recent topics: {json.dumps(recent)}\n" if recent else "")
+        + f"Hook shape for this post: {shape}\n"
+        + (f"AVOID — do not reuse these hooks/questions or their framing: {json.dumps(recent)}\n" if recent else "")
         + (f"Owner's style notes (follow them): {style}\n" if style else "")
         + "No markdown, no code fences, JSON only.")
     if track == "papers":
@@ -274,15 +381,18 @@ def generate_one(store, track, sec=None, state=None, paper=None):
         user = (f"Paper title: {paper['title']}\nURL: {paper['url']}\nSource: {paper.get('source', '')}\n"
                 f"Abstract: {(paper.get('snippet') or '')[:1500]}\n\nWrite the post JSON. Set url to the paper URL.")
     else:
-        seed = hashlib.sha1(f"{track}{_now().isoformat()}".encode()).hexdigest()[:6]
-        user = f"Write the post JSON now. Variation seed: {seed}. Difficulty for this one: {['easy', 'medium', 'medium', 'hard'][int(seed, 16) % 4]}."
+        seed = hashlib.sha1(f"{track}{topic}{_now().isoformat()}".encode()).hexdigest()[:6]
+        user = (f"Topic for this post: {topic}.\nDifficulty: {['easy', 'medium', 'medium', 'hard'][int(seed, 16) % 4]}.\n"
+                f"Write the post JSON now (variation seed {seed}).")
     out = _llm(store, sec, [{"role": "system", "content": system}, {"role": "user", "content": user}])
     item = validate(_parse_json(out), track)
     if item and track == "papers":
         item["url"] = paper["url"]
         item["source"] = paper.get("source") or "paper"
+        item["topic"] = paper["title"][:80]
     elif item:
         item["source"] = "llm"
+        item["topic"] = topic
     return item
 
 
@@ -331,9 +441,13 @@ def ensure_pool(store, track, n=None, budget_s=420):
                 if track == "papers" and not paper:
                     llm_ok = False              # no unseen papers left → seeds
                 else:
-                    item = generate_one(store, track, sec, state, paper)
+                    avoid = [it["hook"] for it in p[track]] + [it["question"][:90] for it in p[track]]
+                    topic = pick_topic(track, state, p[track]) if track != "papers" else None
+                    item = generate_one(store, track, sec, state, paper, topic=topic, avoid=avoid)
                     if paper:
                         state.setdefault("papers_seen", []).append(paper["url"])
+                    if item and any(item["hook"].lower()[:40] == it["hook"].lower()[:40] for it in p[track]):
+                        item = None             # near-duplicate hook → try again
             except Exception as e:
                 notes.append(f"{track}: llm unavailable ({str(e)[:80]})")
                 llm_ok = False
@@ -376,9 +490,30 @@ def ensure_all(store, budget_s=540):
     return notes
 
 
-def reset_pool(store):
-    _save(store, POOL_BLOB, {})
-    return ["edu pool cleared — regenerating on the next timer / on demand"]
+def reset_pool(store, tracks=None):
+    """Drop prepared items (all tracks, or the given ones) so they regenerate."""
+    if tracks is None:
+        _save(store, POOL_BLOB, {})
+        return ["edu pool cleared — regenerating on the next timer / on demand"]
+    allp = _load(store, POOL_BLOB, {})
+    for t in tracks:
+        allp[t] = []
+    _save(store, POOL_BLOB, allp)
+    return [f"edu pool cleared for {', '.join(tracks)}"]
+
+
+def regenerate(store, tracks=None, budget_s=540):
+    """Reset + refill in one call (HTTP/ops action)."""
+    tracks = tracks or [t for t in TRACKS if t != "papers"]
+    notes = reset_pool(store, tracks)
+    t0 = time.time()
+    for t in tracks:
+        left = budget_s - (time.time() - t0)
+        if left < 20:
+            notes.append("budget exhausted")
+            break
+        notes += ensure_pool(store, t, budget_s=min(left, 200))
+    return notes
 
 
 # ---------- caption ----------
@@ -432,7 +567,8 @@ def post_one(store, track):
                 paper = cands[0] if cands else None
                 if paper:
                     state.setdefault("papers_seen", []).append(paper["url"])
-            item = generate_one(store, track, sec, state, paper) if (track != "papers" or paper) else None
+            item = generate_one(store, track, sec, state, paper,
+                                topic=pick_topic(track, state) if track != "papers" else None) if (track != "papers" or paper) else None
         except Exception as e:
             log.info("on-the-fly generation failed: %s", e)
             item = None
@@ -481,7 +617,7 @@ def post_one(store, track):
                 _save(store, POOL_BLOB, allp)
             return [f"edu {track} failed: {str(e)[:100]} | text: {str(e2)[:80]}"]
     state.setdefault("used", []).append({"id": item["id"], "track": track, "q": item["question"][:90],
-                                         "ts": _now().isoformat(), "urn": urn})
+                                         "topic": item.get("topic"), "ts": _now().isoformat(), "urn": urn})
     state["used"] = state["used"][-600:]
     _save(store, STATE_BLOB, state)
     try:

@@ -7,7 +7,7 @@ HTTP (function-key protected):
   linkedin_run?action=generate&group=a..e|company=<name>&hours=N
   linkedin_run?action=drain | heal            (heal = refill queue if empty, then post)
   linkedin_run?action=filler | filler_refill | catchup   (news/chart backlog, missed-slot recovery)
-  linkedin_run?action=edu&track=dsa | edu_generate[&track=] | edu_plan   (educational Q&A posts)
+  linkedin_run?action=edu&track=dsa | edu_generate[&track=] | edu_regenerate[&track=] | edu_plan
   health                                       JSON status, 503 when something is wrong
   linkedin_run?action=testcard&company=<name>
   growth_run?action=ask|poll|poll_post|carousel|carousel_pm|strategy
@@ -172,6 +172,9 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
         elif action == "edu_generate":              # fill pools: &track=<one> or all
             t = req.params.get("track")
             out = jobs.edu_generate(t) if t else jobs.edu_generate_all()
+        elif action == "edu_regenerate":            # throw away today's prepared questions (not papers) and redo
+            t = req.params.get("track")
+            out = jobs.edu_content.regenerate(jobs.posts_store(), [t] if t else None)
         elif action == "edu_plan":
             out = [jobs.content_plan.summary(jobs.posts_store()), jobs.edu_content.plan_text(jobs.posts_store())]
         elif action == "testcard":

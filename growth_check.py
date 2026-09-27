@@ -314,7 +314,7 @@ def _chat_reply(container, subj, user_text):
                     if str(v).lower() in ("true", "1", "yes"):
                         try:
                             import edu_content
-                            edu_content.reset_pool(container); applied.append("today's questions regenerating")
+                            edu_content.reset_pool(container); applied.append("today's questions regenerating (fresh ones are generated slot by slot)")
                         except Exception as e:
                             applied.append(f"regenerate failed: {e}")
                 elif k == "cards_per_company":

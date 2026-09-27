@@ -859,3 +859,14 @@ def test_schedule_has_edu_timers():
     import jobs
     names = {n for n, _, _ in jobs.SCHEDULE}
     assert {"edu_dsa", "edu_sd", "edu_mlsd", "edu_ai", "edu_papers", "edu_topup"} <= names
+
+
+def test_topic_bank_rotation_avoids_recent_and_pool():
+    import edu_content as ec
+    state = {"used": [{"track": "dsa", "topic": ec.TOPICS["dsa"][0]}], "counters": {"dsa": 0}}
+    pool = [{"topic": ec.TOPICS["dsa"][1]}]
+    t = ec.pick_topic("dsa", state, pool)
+    assert t == ec.TOPICS["dsa"][2]
+    assert all(len(v) >= 30 for k, v in ec.TOPICS.items()) and len(ec.HOOK_SHAPES) >= 6
+    assert ec.pick_shape({"counters": {"sd": 3}}, "sd") == ec.HOOK_SHAPES[3]
+    assert ec.pick_topic("papers", state) is None

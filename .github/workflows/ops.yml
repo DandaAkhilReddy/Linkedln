@@ -19,6 +19,7 @@ on:
           - catchup
           - edu_plan
           - edu_generate
+          - edu_regenerate
           - edu_post_dsa
           - edu_post_sd
           - edu_post_mlsd
@@ -51,6 +52,7 @@ jobs:
             catchup)       URL="$BASE/linkedin_run?action=catchup&code=$KEY" ;;
             edu_plan)      URL="$BASE/linkedin_run?action=edu_plan&code=$KEY" ;;
             edu_generate)  URL="$BASE/linkedin_run?action=edu_generate&code=$KEY" ;;
+            edu_regenerate) URL="$BASE/linkedin_run?action=edu_regenerate&code=$KEY" ;;
             edu_post_*)    URL="$BASE/linkedin_run?action=edu&track=${ACTION#edu_post_}&code=$KEY" ;;
             filler_refill) URL="$BASE/linkedin_run?action=filler_refill&code=$KEY" ;;
             filler)        URL="$BASE/linkedin_run?action=filler&code=$KEY" ;;
