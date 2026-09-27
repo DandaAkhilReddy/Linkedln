@@ -642,9 +642,12 @@ def caption_parts(item, include_code=False):
         lines += ["", f"\U0001F511 {bold('Takeaway:')} {item['takeaway']}"]
     if t == "papers" and item.get("url"):
         lines += ["", f"\U0001F4C4 Paper: {item['url']}"]
-    lines += ["", FOLLOW_CTA, "\u267B\ufe0f Repost to help someone prepping this week.", "",
-              TRACK_TAGS[t] + "".join(f" #{x}" for x in item.get("tags", []) if x)
-              + "".join(f" #{n.replace(' ', '')}" for n in names)]
+    tags, seen = [], set()
+    for x in TRACK_TAGS[t].split() + [f"#{x}" for x in item.get("tags", []) if x] + [f"#{n.replace(' ', '')}" for n in names]:
+        if x.lower() not in seen:
+            seen.add(x.lower())
+            tags.append(x)
+    lines += ["", FOLLOW_CTA, "\u267B\ufe0f Repost to help someone prepping this week.", "", " ".join(tags)]
     cap = "\n".join(lines)
     if len(cap) > 2900:
         cap = cap[:2860].rsplit("\n", 1)[0] + "\n\n" + TRACK_TAGS[t]
