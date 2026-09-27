@@ -479,6 +479,9 @@ def test_drain_refills_when_queue_empty(tmp_path, monkeypatch):
     assert calls and calls[0] == 24                      # refill kicked in with the 24h window
     assert any("refill" in n for n in out)
     assert fill == [1] and jobs._posted(out)             # ...and the slot was still filled
+    calls.clear()
+    out2 = jobs.drain()                                  # 10 minutes later: no re-fetch, straight to filler
+    assert not calls and any("refill skipped" in n for n in out2) and fill == [1, 1]
 
 
 def test_drain_guarantee_chain(tmp_path, monkeypatch):
@@ -491,6 +494,7 @@ def test_drain_guarantee_chain(tmp_path, monkeypatch):
     monkeypatch.setattr(la, "generate", lambda store, loader, companies, hours: ["x: no new jobs"])
     monkeypatch.setattr(filler, "post_one", lambda store: (fill.append(1), ["posted filler chart: y urn", "1 posted, 0 filler left"])[1])
     monkeypatch.setattr(la, "drain", lambda store: ["queue empty"])
+    monkeypatch.setattr(jobs, "_refill_due", lambda store: True)
     assert jobs._posted(jobs.drain()) and fill == [1]
     monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (False, "holding queue — volume: last post 3 min ago (< 10)"))
     assert not jobs._posted(jobs.drain()) and fill == [1]          # gate: no filler

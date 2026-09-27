@@ -130,13 +130,32 @@ def drain():
     if _posted(out) or _held(out):
         return out
     if any(n.startswith("queue empty") for n in out):
-        out += ensure_queue()
-        out += linkedin_autopost.drain(store)
-        if _posted(out):
-            return out
+        if _refill_due(store):
+            healthcheck.record(store, "refill", True, "attempt")
+            out += ensure_queue()
+            out += linkedin_autopost.drain(store)
+            if _posted(out):
+                return out
+        else:
+            out.append("refill skipped (tried recently) — filler takes the slot")
     out += filler.post_one(store)
     healthcheck.record(store, "drain", _posted(out), out[-1][:200] if out else "no notes")
     return out
+
+
+REFILL_EVERY_MIN = 45
+
+
+def _refill_due(store):
+    """Re-fetching 17 job boards takes ~2 minutes; when the queue is empty do it
+    at most every REFILL_EVERY_MIN minutes and let the filler take the slots in
+    between (new postings don't appear every 10 minutes anyway)."""
+    try:
+        h = healthcheck._load(store, healthcheck.HEALTH_BLOB, {})
+        last = healthcheck._ts((h.get("refill") or {}).get("ts", ""))
+        return not last or datetime.datetime.now(timezone.utc) - last > timedelta(minutes=REFILL_EVERY_MIN)
+    except Exception:
+        return True
 
 
 def edu_generate(track):
