@@ -9,8 +9,8 @@ pace simply gets the next slot.
 
 Rhythm: two job posts, then one Q&A (J J E J J E …), 48 Q&A slots a day
 shared by the tracks (most-behind first, "behind" = posted < ceil(target ×
-slot/144)); a late-day catch-up lets a short track take an extra E slot but
-never two E in a row. No track due -> job.
+slot/144)). Strict — a Q&A slot only ever follows two job slots; no track
+due -> job.
 """
 
 import math
@@ -51,8 +51,7 @@ def _recent_slot_variants(store, now, n=2):
 def pick(store, now=None, targets=None):
     """Reddy's rhythm: two job posts, then one Q&A — J J E J J E … — so jobs
     keep flowing all day and the five tracks share the E slots (most-behind
-    track first). Late in the day a track that would otherwise miss its
-    quota may take an extra E slot, but never two E in a row."""
+    track first). Strict: a Q&A slot only ever follows two job slots."""
     import edu_content
     now = now or datetime.datetime.now(timezone.utc)
     targets = targets if targets is not None else edu_content.targets(store)
@@ -72,12 +71,7 @@ def pick(store, now=None, targets=None):
     due.sort(reverse=True)
     recent = _recent_slot_variants(store, now, 2)
     edu_flags = [v in edu_content.TRACKS for v in recent]
-    if len(recent) >= 2 and not any(edu_flags):          # J J -> E
-        return due[0][2]
-    # late-day catch-up: still short, last post was a job -> allow E after J E J
-    slots_left = SLOTS_PER_DAY - slot
-    short = sum(d[1] for d in due)
-    if recent and not edu_flags[-1] and short >= slots_left / 3 + 1 and slots_left <= 36:
+    if len(recent) >= 2 and not any(edu_flags):          # J J -> E; anything else -> J
         return due[0][2]
     return "job"
 
