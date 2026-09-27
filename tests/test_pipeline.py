@@ -806,10 +806,14 @@ def test_content_plan_quotas_spread_evenly(tmp_path, monkeypatch):
         pick = cp.pick(s, now)
         counts[pick] = counts.get(pick, 0) + 1
         log.append({"ts": now.isoformat(), "variant": pick if pick != "job" else "salary_hook"})
-    assert all(counts[t] == 10 for t in ec.TRACKS), counts
-    assert counts["job"] == 94
+    assert all(9 <= counts[t] <= 10 for t in ec.TRACKS), counts        # 48 E slots at 2:1 -> 10,10,10,9,9
+    assert 94 <= counts["job"] <= 96
+    seq = [p["variant"] for p in log]
+    edu = [v in ec.TRACKS for v in seq]
+    assert not any(edu[i] and edu[i + 1] for i in range(len(edu) - 1))   # never two Q&A in a row
+    assert seq[0] == "salary_hook" and seq[1] == "salary_hook" and edu[2]   # J J E from the first slot
     # spread: the first 12 hours hold about half of every track (± 1)
-    first_half = [p["variant"] for p in log[:72]]
+    first_half = seq[:72]
     assert all(4 <= first_half.count(t) <= 6 for t in ec.TRACKS)
     # disabled -> always jobs
     s.upload_blob("li_secrets.json", json.dumps({"edu_enabled": "false"}))

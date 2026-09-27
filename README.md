@@ -80,7 +80,7 @@ python worker.py                # scheduler + /health on $PORT
 | **ML system design** | 10 | feature stores, retrieval/ranking, evals, drift, imbalance… |
 | **AI engineering** | 10 | agent loops & graphs, tool calling, RAG, evals, MCP, caching… |
 | **Papers** | 10 | a real recent paper (HF daily papers / arXiv) → what changed, use cases |
-| **Jobs** | 94 | new roles at 17 companies with pay + @tag (the rest of the slots) |
+| **Jobs** | 96 | new roles at 17 companies with pay + @tag — two job posts, then one Q&A, all day (J J E J J E …) |
 | + poll, 2 carousels | 3 | on top, outside the 10-minute clock |
 
 Every educational post is a **question card** (designed figure: array with
@@ -95,9 +95,9 @@ the night before by Azure OpenAI (`edu_content.py`, one call per item, real
 papers for the papers track), rendered and queued in `li_edu_pool.json`; if
 the pool is empty at post time they're generated on the fly, and if the LLM is
 down a hand-written seed bank (`edu_seed.json`) keeps the slot filled. The
-slot planner (`content_plan.py`) is quota-based: each track gets exactly its
-daily count spread evenly, jobs fill everything else, and a missed slot never
-shifts the plan. Change the mix or the style by replying to the daily email
+slot planner (`content_plan.py`) keeps the rhythm two jobs → one Q&A (48 Q&A
+slots a day, most-behind track first, never two Q&A in a row) and a missed
+slot never shifts the plan. Change the mix or the style by replying to the daily email
 ("more system design, fewer papers", "make DSA harder", "regenerate today").
 
 ## The guarantee: 144 slots a day, one every 10 minutes

@@ -7,9 +7,10 @@ pace simply gets the next slot.
 
   pick(store, now) -> "job" | "dsa" | "sd" | "mlsd" | "ai" | "papers"
 
-Rule: track T is "due" when posted_today(T) < ceil(target(T) * slot / 144),
-where slot = minutes since UTC midnight // 10 (+1 so the first slot counts).
-The most-behind due track wins; none due -> job.
+Rhythm: two job posts, then one Q&A (J J E J J E …), 48 Q&A slots a day
+shared by the tracks (most-behind first, "behind" = posted < ceil(target ×
+slot/144)); a late-day catch-up lets a short track take an extra E slot but
+never two E in a row. No track due -> job.
 """
 
 import math
@@ -35,7 +36,23 @@ def _today_counts(store, now):
     return counts
 
 
+def _recent_slot_variants(store, now, n=2):
+    """Variants of the last n slot posts (job cards, fillers, Q&A) — polls and
+    carousels are extras and don't count."""
+    try:
+        plog = json.loads(store.download_blob(POST_LOG).readall())
+    except Exception:
+        plog = []
+    import linkedin_autopost as la
+    out = [p.get("variant") for p in plog if p.get("variant") in la.SLOT_VARIANTS]
+    return out[-n:]
+
+
 def pick(store, now=None, targets=None):
+    """Reddy's rhythm: two job posts, then one Q&A — J J E J J E … — so jobs
+    keep flowing all day and the five tracks share the E slots (most-behind
+    track first). Late in the day a track that would otherwise miss its
+    quota may take an extra E slot, but never two E in a row."""
     import edu_content
     now = now or datetime.datetime.now(timezone.utc)
     targets = targets if targets is not None else edu_content.targets(store)
@@ -43,19 +60,26 @@ def pick(store, now=None, targets=None):
         return "job"
     counts = _today_counts(store, now)
     slot = min(SLOTS_PER_DAY, (now.hour * 60 + now.minute) // 10 + 1)
-    best, best_gap = "job", 0.0
+    due = []
     for track in edu_content.TRACKS:
         tgt = targets.get(track, 0)
-        if not tgt:
-            continue
         done = counts.get(track, 0)
-        if done >= tgt:
-            continue
-        expected = math.ceil(tgt * slot / SLOTS_PER_DAY)
-        gap = (expected - done) / tgt          # relative lag, so small tracks aren't starved
-        if expected > done and gap > best_gap:
-            best, best_gap = track, gap
-    return best
+        if tgt and done < tgt:
+            expected = math.ceil(tgt * slot / SLOTS_PER_DAY)
+            due.append(((expected - done) / tgt, tgt - done, track))
+    if not due:
+        return "job"
+    due.sort(reverse=True)
+    recent = _recent_slot_variants(store, now, 2)
+    edu_flags = [v in edu_content.TRACKS for v in recent]
+    if len(recent) >= 2 and not any(edu_flags):          # J J -> E
+        return due[0][2]
+    # late-day catch-up: still short, last post was a job -> allow E after J E J
+    slots_left = SLOTS_PER_DAY - slot
+    short = sum(d[1] for d in due)
+    if recent and not edu_flags[-1] and short >= slots_left / 3 + 1 and slots_left <= 36:
+        return due[0][2]
+    return "job"
 
 
 def summary(store, now=None):
