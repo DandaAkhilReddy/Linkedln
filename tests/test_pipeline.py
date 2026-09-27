@@ -870,3 +870,23 @@ def test_topic_bank_rotation_avoids_recent_and_pool():
     assert all(len(v) >= 30 for k, v in ec.TOPICS.items()) and len(ec.HOOK_SHAPES) >= 6
     assert ec.pick_shape({"counters": {"sd": 3}}, "sd") == ec.HOOK_SHAPES[3]
     assert ec.pick_topic("papers", state) is None
+
+
+def test_generate_marks_only_carded_jobs_as_posted(tmp_path, monkeypatch):
+    """With cards capped per run, un-carded jobs must stay available for the next refill."""
+    import json, types, linkedin_autopost as la
+    s = _edu_store(tmp_path, monkeypatch)
+    s.upload_blob("li_secrets.json", json.dumps({"linkedin_autopost_enabled": "true", "cards_per_company": 1, "jobs_per_card": 2}))
+    jobs = [{"id": str(i), "title": f"Software Engineer {i}", "name": f"Software Engineer {i}", "locations": ["Austin, TX"]} for i in range(10)]
+    pipe = types.SimpleNamespace(get_jobs=lambda cutoff=None: list(jobs), sort_software_first=lambda j: list(j),
+                                 fetch_detail=lambda i: {"salary": "$100,000 - $150,000", "url": f"https://x/{i}"})
+    la._set_companies({"testco": {"pipeline": pipe}})
+    la.ORG_URNS.setdefault("testco", "urn:li:organization:1")
+    import card_builder
+    monkeypatch.setattr(card_builder, "build_card", lambda *a, **k: b"png")
+    notes = la.generate(s, lambda c: None, ["testco"], 24)
+    state = json.loads(s.download_blob("li_testco_state.json").readall())
+    assert len(state["posted_ids"]) == 2 and any("queued 1 cards" in n for n in notes)
+    notes2 = la.generate(s, lambda c: None, ["testco"], 24)       # next run finds the remaining 8
+    assert any("queued 1 cards" in n for n in notes2)
+    assert len(json.loads(s.download_blob("li_testco_state.json").readall())["posted_ids"]) == 4

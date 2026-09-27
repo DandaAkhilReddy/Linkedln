@@ -335,8 +335,11 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
         growth_posts.record_facts(container, company, fresh, _job_loc, _job_url)
     except Exception:
         pass
-    state["posted_ids"] = list(dict.fromkeys(
-        list(posted) + [str(j.get("id")) for j in fresh]))[-8000:]
+    # only the jobs that actually became cards are "posted"; the rest stay
+    # available for the next generate/refill (with cards capped per run, marking
+    # everything fetched used to throw away most of the day's supply)
+    carded = [str(j.get("id")) for chunk in chunks for j in chunk]
+    state["posted_ids"] = list(dict.fromkeys(list(posted) + carded))[-8000:]
     state["last_run"] = now.isoformat()
     _save(container, _li_state_blob(company), state)
     notes.append(f"{company}: queued {len(chunks)} cards ({len(new)} jobs)")
