@@ -428,9 +428,26 @@ DRAWERS = {"array": draw_array, "code": draw_code, "boxes": draw_boxes, "pipelin
 
 # ---------- the card ----------
 
-def render(track, question, visual=None, number=None, difficulty=None, hook=None, footer=None):
-    """1200×627 PNG bytes. `question` is the text shown; `visual` the spec dict."""
+def _company_logo(company, logo_loader, max_w=120, max_h=30):
+    from PIL import Image
+    import card_builder
+    raw = card_builder._logo_bytes(company, logo_loader)
+    if not raw:
+        return None
+    try:
+        lg = card_builder._trim_logo(Image.open(io.BytesIO(raw)))
+        scale = min(max_w / lg.width, max_h / lg.height, 2.0)
+        return lg.resize((max(1, int(lg.width * scale)), max(1, int(lg.height * scale))))
+    except Exception:
+        return None
+
+
+def render(track, question, visual=None, number=None, difficulty=None, hook=None, footer=None,
+           companies=None, logo_loader=None):
+    """1200×627 PNG bytes. `question` is the text shown; `visual` the spec dict;
+    `companies` (keys) are shown as logos in the footer ("Asked at")."""
     from PIL import Image, ImageDraw
+    import card_builder
     pal = TRACKS.get(track, DEFAULT_TRACK)
     question = clean_text(question)
     visual = clean_spec(visual) if isinstance(visual, dict) else visual
@@ -476,10 +493,29 @@ def render(track, question, visual=None, number=None, difficulty=None, hook=None
             for ln in lines:
                 d.text((60, y), ln, font=f, fill=INK)
                 y += lh
-    # footer
+    # footer: "Asked at" + logos on the left, follow line on the right
     d.line([60, H - 70, W - 60, H - 70], fill=(229, 231, 235), width=2)
-    d.text((60, H - 56), footer or "Answer is under “…more”  ·  comment yours first", font=font(22, "Medium"), fill=INK)
-    right = "follow for a new question every day"
+    x = 60
+    drawn = 0
+    if companies:
+        fa = font(20, "Medium")
+        d.text((x, H - 54), "Asked at", font=fa, fill=GRAY)
+        x += d.textlength("Asked at", font=fa) + 18
+        for c in list(companies)[:3]:
+            lg = _company_logo(c, logo_loader)
+            if lg is not None:
+                im.paste(lg, (int(x), H - 60 + (30 - lg.height) // 2), lg if lg.mode == "RGBA" else None)
+                x += lg.width + 26
+                drawn += 1
+            else:
+                name = card_builder.display_name(c)
+                d.text((x, H - 54), name, font=font(20, "Bold"), fill=INK)
+                x += d.textlength(name, font=font(20, "Bold")) + 26
+                drawn += 1
+    if not drawn:
+        d.text((60, H - 56), footer or "Answer is under \u201c\u2026more\u201d  \u00b7  comment yours first",
+               font=font(22, "Medium"), fill=INK)
+    right = "answer under \u201c\u2026more\u201d \u00b7 follow for one a day"
     fr = font(20, "Regular")
     d.text((W - 60 - d.textlength(right, font=fr), H - 54), right, font=fr, fill=GRAY)
     buf = io.BytesIO()

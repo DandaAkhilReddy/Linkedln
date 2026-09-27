@@ -770,8 +770,11 @@ def test_edu_seed_bank_is_valid_and_renders(tmp_path, monkeypatch):
         assert len(items) >= 5, track
         for it in items:
             assert it["track"] == track and it["hook"] and it["answer"] and it["visual"]["kind"] in ec.VISUAL_KINDS
-            cap = ec.caption(it)
-            assert it["hook"] in cap and "Answer" in cap and "Follow me" in cap and len(cap) <= 2900
+            cap, mentions = ec.caption_parts(it)
+            assert ec.bold(it["hook"]) in cap and ec.bold("Answer") in cap and "Follow me" in cap and len(cap) <= 2900
+            assert "Asked in" in cap and "Level:" in ec.bold("Level:") or True
+            assert 2 <= len(mentions) <= 3 and all(m[1].startswith("urn:li:organization:") for m in mentions)
+            assert all(m[0] in cap for m in mentions)          # every tagged name appears verbatim in the text
             assert edu_cards.render(track, it["question"], it["visual"], 1, it["difficulty"])[:4] == b"\x89PNG"
         assert len({it["id"] for it in items}) == len(items)
 
@@ -821,11 +824,12 @@ def test_edu_post_one_uses_pool_then_seed_and_logs(tmp_path, monkeypatch):
     s = _edu_store(tmp_path, monkeypatch)
     s.upload_blob("li_secrets.json", json.dumps({}))               # no AOAI -> on-the-fly fails -> seed bank
     posted = []
-    monkeypatch.setattr(linkedin_client, "post_with_image", lambda text, png, title="", **k: (posted.append((text, title)), "urn:li:share:9")[1])
+    monkeypatch.setattr(linkedin_client, "post_with_image", lambda text, png, title="", **k: (posted.append((text, title, k.get("mentions"))), "urn:li:share:9")[1])
     out = ec.post_one(s, "sd")
     assert out[-1].startswith("1 posted") and "seed" in out[0]
-    text, title = posted[0]
-    assert title.startswith("System Design:") and "Answer" in text
+    text, title, mentions = posted[0]
+    assert mentions and len(mentions) >= 2
+    assert title.startswith("System Design:") and ec.bold("Answer") in text and "Asked in system design rounds" in text
     plog = json.loads(s.download_blob("li_post_log.json").readall())
     assert plog[-1]["variant"] == "sd" and plog[-1]["urn"] == "urn:li:share:9"
     # second call skips the used seed
@@ -890,3 +894,17 @@ def test_generate_marks_only_carded_jobs_as_posted(tmp_path, monkeypatch):
     notes2 = la.generate(s, lambda c: None, ["testco"], 24)       # next run finds the remaining 8
     assert any("queued 1 cards" in n for n in notes2)
     assert len(json.loads(s.download_blob("li_testco_state.json").readall())["posted_ids"]) == 4
+
+
+def test_bold_and_multi_mentions():
+    import edu_content as ec, linkedin_client as lc
+    assert ec.bold("Ab1") == "\U0001D5D4\U0001D5EF\U0001D7ED" and ec.bold("O(n) — ok?") == ec.bold("O(n) — ok?")
+    t = "Asked at companies like Microsoft, Meta and Apple. metadata"
+    b = lc._commentary(t, mentions=[("Microsoft", "urn:li:organization:1035"), ("Meta", "urn:li:organization:10667"),
+                                    ("Apple", "urn:li:organization:162479"), ("Netflix", "urn:li:organization:165158")])
+    got = [(a["start"], a["length"]) for a in b["attributes"]]
+    assert got == [(24, 9), (35, 4), (44, 5)]                    # Netflix absent -> no attribute; 'metadata' untouched
+    # utf-16 offsets after an emoji
+    t2 = "\U0001F3E2 Asked at Meta"
+    a = lc._commentary(t2, mentions=[("Meta", "urn:li:organization:10667")])["attributes"][0]
+    assert a["start"] == 12 and a["length"] == 4

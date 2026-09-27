@@ -8,8 +8,36 @@
       "code": "def two_sum_sorted(a, target):\n    l, r = 0, len(a) - 1\n    while l < r:\n        s = a[l] + a[r]\n        if s == target:\n            return l, r\n        if s < target:\n            l += 1\n        else:\n            r -= 1\n    return None",
       "complexity": "Time O(n) · Space O(1)",
       "takeaway": "When the input is sorted, reach for two pointers before a hash map.",
-      "visual": {"kind": "array", "values": [2, 7, 11, 15, 19, 23], "highlight": [0, 3], "pointers": {"0": "L", "5": "R"}, "caption": "target = 17"},
-      "tags": ["TwoPointers", "Arrays"]
+      "visual": {
+        "kind": "array",
+        "values": [
+          2,
+          7,
+          11,
+          15,
+          19,
+          23
+        ],
+        "highlight": [
+          0,
+          3
+        ],
+        "pointers": {
+          "0": "L",
+          "5": "R"
+        },
+        "caption": "target = 17"
+      },
+      "tags": [
+        "TwoPointers",
+        "Arrays"
+      ],
+      "companies": [
+        "microsoft",
+        "amazon",
+        "google"
+      ],
+      "level": "SDE I / SDE II"
     },
     {
       "hook": "A 6-line function that shows up in more interviews than any other.",
@@ -19,8 +47,21 @@
       "code": "def valid(s):\n    pairs = {')': '(', ']': '[', '}': '{'}\n    stack = []\n    for ch in s:\n        if ch in '([{':\n            stack.append(ch)\n        elif not stack or stack.pop() != pairs[ch]:\n            return False\n    return not stack",
       "complexity": "Time O(n) · Space O(n)",
       "takeaway": "\"Most recent open thing must close first\" = stack.",
-      "visual": {"kind": "code", "lang": "python", "code": "def valid(s):\n    pairs = {')': '(', ']': '[', '}': '{'}\n    stack = []\n    for ch in s:\n        if ch in '([{':\n            stack.append(ch)\n        elif not stack or stack.pop() != pairs[ch]:\n            return False\n    return not stack"},
-      "tags": ["Stack", "Strings"]
+      "visual": {
+        "kind": "code",
+        "lang": "python",
+        "code": "def valid(s):\n    pairs = {')': '(', ']': '[', '}': '{'}\n    stack = []\n    for ch in s:\n        if ch in '([{':\n            stack.append(ch)\n        elif not stack or stack.pop() != pairs[ch]:\n            return False\n    return not stack"
+      },
+      "tags": [
+        "Stack",
+        "Strings"
+      ],
+      "companies": [
+        "amazon",
+        "microsoft",
+        "meta"
+      ],
+      "level": "SDE I / SDE II"
     },
     {
       "hook": "Kadane's algorithm in one sentence — most people can't state the invariant.",
@@ -30,8 +71,37 @@
       "code": "def max_subarray(a):\n    best = cur = a[0]\n    for x in a[1:]:\n        cur = max(x, cur + x)\n        best = max(best, cur)\n    return best",
       "complexity": "Time O(n) · Space O(1)",
       "takeaway": "Dynamic programming with a single variable: keep the best answer that ends at the current position.",
-      "visual": {"kind": "array", "values": [-2, 1, -3, 4, -1, 2, 1, -5, 4], "highlight": [3, 4, 5, 6], "caption": "max sum = 6"},
-      "tags": ["DynamicProgramming", "Arrays"]
+      "visual": {
+        "kind": "array",
+        "values": [
+          -2,
+          1,
+          -3,
+          4,
+          -1,
+          2,
+          1,
+          -5,
+          4
+        ],
+        "highlight": [
+          3,
+          4,
+          5,
+          6
+        ],
+        "caption": "max sum = 6"
+      },
+      "tags": [
+        "DynamicProgramming",
+        "Arrays"
+      ],
+      "companies": [
+        "google",
+        "meta",
+        "amazon"
+      ],
+      "level": "SDE II / Senior"
     },
     {
       "hook": "Two runners on a track — that is the whole proof.",
@@ -41,8 +111,26 @@
       "code": "def cycle_start(head):\n    slow = fast = head\n    while fast and fast.next:\n        slow, fast = slow.next, fast.next.next\n        if slow is fast:\n            p = head\n            while p is not slow:\n                p, slow = p.next, slow.next\n            return p\n    return None",
       "complexity": "Time O(n) · Space O(1)",
       "takeaway": "Fast/slow pointers replace a visited-set whenever the structure has a 'next'.",
-      "visual": {"kind": "boxes", "items": ["3", "2", "0", "-4", "back to 2"]},
-      "tags": ["LinkedList", "TwoPointers"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "3",
+          "2",
+          "0",
+          "-4",
+          "back to 2"
+        ]
+      },
+      "tags": [
+        "LinkedList",
+        "TwoPointers"
+      ],
+      "companies": [
+        "microsoft",
+        "apple",
+        "amazon"
+      ],
+      "level": "SDE II / Senior"
     },
     {
       "hook": "Binary search still works on this rotated array — if you know which half to trust.",
@@ -52,8 +140,37 @@
       "code": "def search(a, t):\n    lo, hi = 0, len(a) - 1\n    while lo <= hi:\n        m = (lo + hi) // 2\n        if a[m] == t:\n            return m\n        if a[lo] <= a[m]:            # left half sorted\n            if a[lo] <= t < a[m]: hi = m - 1\n            else: lo = m + 1\n        else:                        # right half sorted\n            if a[m] < t <= a[hi]: lo = m + 1\n            else: hi = m - 1\n    return -1",
       "complexity": "Time O(log n) · Space O(1)",
       "takeaway": "Binary search needs a way to discard half the input — 'which half is sorted?' is that way.",
-      "visual": {"kind": "array", "values": [4, 5, 6, 7, 0, 1, 2], "highlight": [4], "pointers": {"0": "lo", "3": "mid", "6": "hi"}, "caption": "target = 0"},
-      "tags": ["BinarySearch", "Arrays"]
+      "visual": {
+        "kind": "array",
+        "values": [
+          4,
+          5,
+          6,
+          7,
+          0,
+          1,
+          2
+        ],
+        "highlight": [
+          4
+        ],
+        "pointers": {
+          "0": "lo",
+          "3": "mid",
+          "6": "hi"
+        },
+        "caption": "target = 0"
+      },
+      "tags": [
+        "BinarySearch",
+        "Arrays"
+      ],
+      "companies": [
+        "amazon",
+        "google",
+        "microsoft"
+      ],
+      "level": "SDE II / Senior"
     },
     {
       "hook": "The trick that turns an O(n·k) problem into O(n).",
@@ -63,8 +180,32 @@
       "code": "from collections import deque\ndef window_max(a, k):\n    dq, out = deque(), []\n    for i, x in enumerate(a):\n        while dq and a[dq[-1]] < x:\n            dq.pop()\n        dq.append(i)\n        if dq[0] <= i - k:\n            dq.popleft()\n        if i >= k - 1:\n            out.append(a[dq[0]])\n    return out",
       "complexity": "Time O(n) · Space O(k)",
       "takeaway": "Monotonic stack/deque = 'throw away anything that can never be the answer again'.",
-      "visual": {"kind": "array", "values": [2, 1, 2, 0, 1], "highlight": [0, 1, 2], "caption": "k = 3 → [2, 2, 2]"},
-      "tags": ["SlidingWindow", "MonotonicDeque"]
+      "visual": {
+        "kind": "array",
+        "values": [
+          2,
+          1,
+          2,
+          0,
+          1
+        ],
+        "highlight": [
+          0,
+          1,
+          2
+        ],
+        "caption": "k = 3 → [2, 2, 2]"
+      },
+      "tags": [
+        "SlidingWindow",
+        "MonotonicDeque"
+      ],
+      "companies": [
+        "google",
+        "meta",
+        "nvidia"
+      ],
+      "level": "Senior / Staff"
     }
   ],
   "sd": [
@@ -75,8 +216,27 @@
       "answer": "Don't hash the URL (collisions, and the same URL should be shortenable twice). Options:\n\n1. Pre-allocated ranges: a central counter hands each server a block of 1M IDs; servers count locally and base-62 encode. Simple, no per-request coordination.\n2. Snowflake-style IDs: timestamp + machine id + sequence — unique without any coordination, 64 bits, sortable.\n3. Random 7-char keys with a uniqueness check in the KV store — fine at this scale (62^7 ≈ 3.5 trillion).\n\nReads dominate (100:1), so put the id→URL map behind a cache and use 301 vs 302 deliberately (302 if you need click analytics).",
       "complexity": "~40 writes/s, ~4K reads/s at peak — a single KV store + cache handles it easily",
       "takeaway": "Uniqueness is easier to buy with ranges or timestamps than with hashing.",
-      "visual": {"kind": "boxes", "items": ["Client", "API Gateway", "Shortener Service", "ID Generator", "Key-Value Store", "Cache (Redis)"]},
-      "tags": ["SystemDesign", "DistributedSystems"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Client",
+          "API Gateway",
+          "Shortener Service",
+          "ID Generator",
+          "Key-Value Store",
+          "Cache (Redis)"
+        ]
+      },
+      "tags": [
+        "SystemDesign",
+        "DistributedSystems"
+      ],
+      "companies": [
+        "amazon",
+        "microsoft",
+        "google"
+      ],
+      "level": "Senior / Staff"
     },
     {
       "hook": "Token bucket or sliding window? Wrong answer = angry customers at midnight.",
@@ -85,8 +245,46 @@
       "answer": "Token bucket: O(1) memory per user (tokens + last refill time), allows short bursts up to the bucket size, tiny CPU cost. Great default.\n\nSliding-window log: stores every request timestamp → exact limits, no bursts, but O(requests) memory per user.\n\nMiddle ground: sliding-window COUNTER (current + weighted previous window) — O(1) memory, no burst at the boundary.\n\nAcross servers keep the state in Redis with an atomic Lua script (read-refill-decrement in one call) so two servers can't both let the 100th request through.",
       "complexity": "Token bucket: O(1) memory & time per check",
       "takeaway": "Pick token bucket unless the product explicitly forbids bursts.",
-      "visual": {"kind": "table", "header": ["", "Token bucket", "Sliding log"], "rows": [["memory / user", "O(1)", "O(requests)"], ["bursts", "allowed", "blocked"], ["accuracy", "approx", "exact"], ["multi-server", "Redis + Lua", "Redis + Lua"]]},
-      "tags": ["RateLimiting", "SystemDesign"]
+      "visual": {
+        "kind": "table",
+        "header": [
+          "",
+          "Token bucket",
+          "Sliding log"
+        ],
+        "rows": [
+          [
+            "memory / user",
+            "O(1)",
+            "O(requests)"
+          ],
+          [
+            "bursts",
+            "allowed",
+            "blocked"
+          ],
+          [
+            "accuracy",
+            "approx",
+            "exact"
+          ],
+          [
+            "multi-server",
+            "Redis + Lua",
+            "Redis + Lua"
+          ]
+        ]
+      },
+      "tags": [
+        "RateLimiting",
+        "SystemDesign"
+      ],
+      "companies": [
+        "stripe",
+        "amazon",
+        "google"
+      ],
+      "level": "Senior / Staff"
     },
     {
       "hook": "Twitter's original feed design broke on one type of user. Which one?",
@@ -95,8 +293,35 @@
       "answer": "Fan-out on write gives fast, cheap reads (the feed is precomputed) but a celebrity with 10M followers turns one post into 10M writes.\n\nFan-out on read makes writes cheap but each feed request must merge posts from hundreds of followees — slow for active users.\n\nProduction answer is hybrid: push for normal accounts, pull for accounts above a follower threshold, merge the two at read time. Precomputed feeds live in a cache with a bounded length; cold feeds are rebuilt on demand.",
       "complexity": "Hybrid keeps reads O(cache lookup + few celebrity merges)",
       "takeaway": "Whenever a design is 'push vs pull', the real answer is usually 'push for most, pull for the whales'.",
-      "visual": {"kind": "compare", "left": {"title": "Fan-out on write", "points": ["reads are a cache lookup", "1 post = N follower writes", "celebrity posts explode"]}, "right": {"title": "Fan-out on read", "points": ["writes are cheap", "reads merge many sources", "slow for heavy users"]}},
-      "tags": ["SystemDesign", "NewsFeed"]
+      "visual": {
+        "kind": "compare",
+        "left": {
+          "title": "Fan-out on write",
+          "points": [
+            "reads are a cache lookup",
+            "1 post = N follower writes",
+            "celebrity posts explode"
+          ]
+        },
+        "right": {
+          "title": "Fan-out on read",
+          "points": [
+            "writes are cheap",
+            "reads merge many sources",
+            "slow for heavy users"
+          ]
+        }
+      },
+      "tags": [
+        "SystemDesign",
+        "NewsFeed"
+      ],
+      "companies": [
+        "meta",
+        "netflix",
+        "amazon"
+      ],
+      "level": "Staff / Principal / Director"
     },
     {
       "hook": "The client retried. The customer got charged twice. Whose fault?",
@@ -105,8 +330,26 @@
       "answer": "Idempotency keys. The client generates a unique key per logical operation and sends it on every retry. The server stores (key → result) atomically with the charge; a retry with a known key returns the stored result instead of charging again.\n\nDetails that matter: store the key in the same transaction as the side effect (or use a conditional insert first), set a TTL (24h is common), and return the original response — including errors — so the client sees consistent behavior.",
       "complexity": "One extra keyed lookup per request",
       "takeaway": "Retries are safe only when the operation is idempotent — make it so with a key, don't hope.",
-      "visual": {"kind": "boxes", "items": ["Client (key=abc)", "API", "Lookup key", "Charge + store", "Return stored result"]},
-      "tags": ["Payments", "Idempotency"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Client (key=abc)",
+          "API",
+          "Lookup key",
+          "Charge + store",
+          "Return stored result"
+        ]
+      },
+      "tags": [
+        "Payments",
+        "Idempotency"
+      ],
+      "companies": [
+        "stripe",
+        "amazon",
+        "apple"
+      ],
+      "level": "Senior / Staff"
     },
     {
       "hook": "Back-of-the-envelope in 60 seconds — can you?",
@@ -115,8 +358,23 @@
       "answer": "Writes: 100M × 2 = 200M/day ÷ 86,400 ≈ 2,300/s (peak ~2-3× → ~7K/s).\nReads: 100M × 50 = 5B/day ≈ 58K/s (peak ~150K/s).\nStorage: 200M posts/day × 1 KB = 200 GB/day → ~73 TB/year → ~365 TB in 5 years before replication (×3 → ~1 PB).\n\nThe read:write ratio (25:1) tells you where the design effort goes: caching and read replicas, not write throughput.",
       "complexity": "Peak reads ~150K QPS → cache tier is mandatory",
       "takeaway": "Estimate first; the numbers decide the architecture, not the other way round.",
-      "visual": {"kind": "metric", "big": "~58K", "small": "reads per second (avg)", "big2": "~1 PB", "small2": "5-year storage, 3× replicated"},
-      "tags": ["SystemDesign", "Estimation"]
+      "visual": {
+        "kind": "metric",
+        "big": "~58K",
+        "small": "reads per second (avg)",
+        "big2": "~1 PB",
+        "small2": "5-year storage, 3× replicated"
+      },
+      "tags": [
+        "SystemDesign",
+        "Estimation"
+      ],
+      "companies": [
+        "google",
+        "amazon",
+        "microsoft"
+      ],
+      "level": "SDE II / Senior"
     }
   ],
   "mlsd": [
@@ -127,8 +385,26 @@
       "answer": "Training/serving skew = the features the model sees at inference are computed differently from the ones it was trained on (different code path, different time window, data that wasn't available yet at prediction time).\n\nA feature store fixes it by defining each feature ONCE and serving the same definition to both the offline training pipeline (point-in-time correct joins) and the online store (low-latency lookups). Log the features actually used at inference and train on those logs.\n\nAlso check: label leakage (a feature that only exists after the fraud is known) and time-based splits instead of random splits.",
       "complexity": "Online store lookup: < 10 ms p99 is the usual budget",
       "takeaway": "One feature definition, two serving paths — never two implementations.",
-      "visual": {"kind": "boxes", "items": ["Raw events", "Feature pipeline", "Offline store (training)", "Online store (serving)", "Model"]},
-      "tags": ["MLOps", "FeatureStore"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Raw events",
+          "Feature pipeline",
+          "Offline store (training)",
+          "Online store (serving)",
+          "Model"
+        ]
+      },
+      "tags": [
+        "MLOps",
+        "FeatureStore"
+      ],
+      "companies": [
+        "meta",
+        "google",
+        "amazon"
+      ],
+      "level": "Senior ML Engineer"
     },
     {
       "hook": "Why every big recommender is two models, not one.",
@@ -137,8 +413,27 @@
       "answer": "Scoring 50M items with a heavy model per request is impossible in 100 ms. Split into stages:\n\n1. Candidate retrieval: a two-tower model embeds users and items; an approximate nearest-neighbor index (HNSW/FAISS) returns ~1,000 candidates in a few ms.\n2. Ranking: a heavier model (cross features, transformers) scores only those candidates.\n3. Re-ranking: business rules — diversity, freshness, dedup, policy.\n\nItem embeddings are precomputed offline; the user tower runs online.",
       "complexity": "ANN retrieval ~5 ms + ranking 1K items ~30 ms",
       "takeaway": "Retrieval buys recall cheaply; ranking spends compute only where it matters.",
-      "visual": {"kind": "boxes", "items": ["50M items", "Two-tower retrieval (ANN)", "~1K candidates", "Ranking model", "Re-rank + rules", "Top 20"]},
-      "tags": ["RecSys", "MLSystemDesign"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "50M items",
+          "Two-tower retrieval (ANN)",
+          "~1K candidates",
+          "Ranking model",
+          "Re-rank + rules",
+          "Top 20"
+        ]
+      },
+      "tags": [
+        "RecSys",
+        "MLSystemDesign"
+      ],
+      "companies": [
+        "netflix",
+        "meta",
+        "google"
+      ],
+      "level": "Staff ML / ML Lead"
     },
     {
       "hook": "Offline metrics went up. Revenue went down. What did they miss?",
@@ -147,8 +442,35 @@
       "answer": "Offline metrics are computed on logged data produced by the OLD model, so they can't see items the old model never showed (position bias, feedback loops). Run an online experiment:\n\n1. Shadow deploy first — serve both, log new predictions, no user impact.\n2. A/B test with a guardrail metric set (latency, revenue, complaints) and a primary metric you fixed in advance.\n3. Size the test for the minimum detectable effect; don't peek and stop early.\n4. Interleaving can detect ranking differences with far less traffic than A/B.",
       "complexity": "A/B needs enough traffic for the MDE — often days, not hours",
       "takeaway": "Offline = 'is it worth testing'. Online = 'is it better'.",
-      "visual": {"kind": "compare", "left": {"title": "Offline eval", "points": ["fast and cheap", "biased by the old policy", "no business metrics"]}, "right": {"title": "Online A/B", "points": ["measures the real objective", "needs traffic and time", "guardrails catch regressions"]}},
-      "tags": ["Experimentation", "MLOps"]
+      "visual": {
+        "kind": "compare",
+        "left": {
+          "title": "Offline eval",
+          "points": [
+            "fast and cheap",
+            "biased by the old policy",
+            "no business metrics"
+          ]
+        },
+        "right": {
+          "title": "Online A/B",
+          "points": [
+            "measures the real objective",
+            "needs traffic and time",
+            "guardrails catch regressions"
+          ]
+        }
+      },
+      "tags": [
+        "Experimentation",
+        "MLOps"
+      ],
+      "companies": [
+        "google",
+        "meta",
+        "netflix"
+      ],
+      "level": "Senior ML Engineer"
     },
     {
       "hook": "Nobody changed the model. It got worse anyway.",
@@ -157,8 +479,41 @@
       "answer": "Data drift: input distributions shift (new regions, new product mix). Monitor per-feature statistics vs the training baseline — PSI or KL divergence, with alerts.\n\nConcept drift: the relationship between inputs and the target changes (a pandemic, a competitor). Monitor live accuracy when labels arrive; when they lag, monitor prediction distributions as a proxy.\n\nUpstream drift: a pipeline change silently alters a feature (units, nulls). Schema + null-rate checks at ingestion.\n\nFix: scheduled retraining with champion/challenger evaluation, and rollback on guardrail breach.",
       "complexity": "Feature-stat monitoring is cheap; label-based accuracy monitoring is delayed by label lag",
       "takeaway": "Monitor inputs AND outputs — accuracy alone tells you too late.",
-      "visual": {"kind": "table", "header": ["Drift", "What moves", "Monitor with"], "rows": [["Data", "input distribution", "PSI / KL per feature"], ["Concept", "X → y relationship", "live accuracy, calibration"], ["Upstream", "pipeline / schema", "null rates, ranges"]]},
-      "tags": ["Monitoring", "MLOps"]
+      "visual": {
+        "kind": "table",
+        "header": [
+          "Drift",
+          "What moves",
+          "Monitor with"
+        ],
+        "rows": [
+          [
+            "Data",
+            "input distribution",
+            "PSI / KL per feature"
+          ],
+          [
+            "Concept",
+            "X → y relationship",
+            "live accuracy, calibration"
+          ],
+          [
+            "Upstream",
+            "pipeline / schema",
+            "null rates, ranges"
+          ]
+        ]
+      },
+      "tags": [
+        "Monitoring",
+        "MLOps"
+      ],
+      "companies": [
+        "amazon",
+        "microsoft",
+        "netflix"
+      ],
+      "level": "Senior ML Engineer"
     },
     {
       "hook": "0.1% positives. Accuracy 99.9%. Model useless. Fix it.",
@@ -167,8 +522,23 @@
       "answer": "Accuracy is meaningless (predict 'legit' always → 99.9%). Optimize precision-recall AUC or recall at a fixed false-positive budget, because the cost of a false positive (blocked customer) and a false negative (lost money) are different — set the threshold from those costs.\n\nHandling imbalance: class weights or focal loss in the objective, careful negative sampling for training speed (not for evaluation), and never resample the test set. Calibrate probabilities afterwards if the training distribution was altered.",
       "complexity": "Threshold chosen from business costs, not 0.5",
       "takeaway": "Rare-event problems are threshold problems — pick the metric that reflects the cost.",
-      "visual": {"kind": "metric", "big": "0.1%", "small": "positive rate", "big2": "PR-AUC", "small2": "not accuracy"},
-      "tags": ["Classification", "FraudDetection"]
+      "visual": {
+        "kind": "metric",
+        "big": "0.1%",
+        "small": "positive rate",
+        "big2": "PR-AUC",
+        "small2": "not accuracy"
+      },
+      "tags": [
+        "Classification",
+        "FraudDetection"
+      ],
+      "companies": [
+        "stripe",
+        "amazon",
+        "google"
+      ],
+      "level": "ML Engineer"
     }
   ],
   "ai": [
@@ -180,8 +550,48 @@
       "code": "state = {\"steps\": 0, \"history\": []}\nwhile state[\"steps\"] < MAX_STEPS:\n    action = plan(state)\n    if action.done:\n        break\n    obs = call_tool(action)      # may fail\n    state[\"history\"].append((action, obs))\n    state[\"steps\"] += 1\nreturn finalize(state)",
       "complexity": "Bound every loop: steps, tokens, wall clock",
       "takeaway": "Agents are loops; production agents are BOUNDED loops with a router that can say stop.",
-      "visual": {"kind": "graph", "nodes": ["plan", "call tool", "observe", "reflect", "done"], "edges": [[0, 1], [1, 2], [2, 3], [3, 0], [3, 4]]},
-      "tags": ["Agents", "LangGraph"]
+      "visual": {
+        "kind": "graph",
+        "nodes": [
+          "plan",
+          "call tool",
+          "observe",
+          "reflect",
+          "done"
+        ],
+        "edges": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            4
+          ]
+        ]
+      },
+      "tags": [
+        "Agents",
+        "LangGraph"
+      ],
+      "companies": [
+        "openai",
+        "anthropic",
+        "microsoft"
+      ],
+      "level": "Senior AI Engineer"
     },
     {
       "hook": "Your RAG isn't bad at retrieval. It's bad at chunking.",
@@ -190,8 +600,37 @@
       "answer": "Chunk by structure, not by character count: headings, paragraphs, code blocks — then cap size (300-800 tokens) with 10-20% overlap so a sentence split at a boundary survives.\n\nAdd context to each chunk before embedding: document title, section path, and a one-line summary ('contextual chunking'). Retrieve more than you need (top-20), then rerank with a cross-encoder to pick top-5.\n\nCombine dense (embeddings) with sparse (BM25) — hybrid search fixes exact-term misses like product codes. Evaluate with a golden set of questions → expected chunks, and measure recall@k, not just final-answer vibes.",
       "complexity": "Rerank adds ~50-100 ms; usually worth it",
       "takeaway": "Fix the chunk boundaries and add context before touching the model.",
-      "visual": {"kind": "compare", "left": {"title": "Naive chunking", "points": ["fixed 512 chars", "splits mid-sentence", "no document context", "dense only"]}, "right": {"title": "Production chunking", "points": ["by heading / paragraph", "10-20% overlap", "title + section prepended", "hybrid + rerank"]}},
-      "tags": ["RAG", "Retrieval"]
+      "visual": {
+        "kind": "compare",
+        "left": {
+          "title": "Naive chunking",
+          "points": [
+            "fixed 512 chars",
+            "splits mid-sentence",
+            "no document context",
+            "dense only"
+          ]
+        },
+        "right": {
+          "title": "Production chunking",
+          "points": [
+            "by heading / paragraph",
+            "10-20% overlap",
+            "title + section prepended",
+            "hybrid + rerank"
+          ]
+        }
+      },
+      "tags": [
+        "RAG",
+        "Retrieval"
+      ],
+      "companies": [
+        "databricks",
+        "openai",
+        "microsoft"
+      ],
+      "level": "Senior AI Engineer"
     },
     {
       "hook": "The model returned JSON. Then it didn't. Then your pipeline died at 3 AM.",
@@ -201,8 +640,26 @@
       "code": "for attempt in range(2):\n    raw = llm(prompt, schema=Order.schema())\n    try:\n        return Order.model_validate_json(raw)\n    except ValidationError as e:\n        prompt += f\"\\nFix this error: {e}\"\nraise RuntimeError(\"unparseable\")",
       "complexity": "One validated retry catches most residual failures",
       "takeaway": "Schema in, validation out, retry with the error in between.",
-      "visual": {"kind": "boxes", "items": ["Prompt + JSON schema", "LLM (structured mode)", "Validate (pydantic)", "Retry with error", "Typed object"]},
-      "tags": ["StructuredOutputs", "LLMEngineering"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Prompt + JSON schema",
+          "LLM (structured mode)",
+          "Validate (pydantic)",
+          "Retry with error",
+          "Typed object"
+        ]
+      },
+      "tags": [
+        "StructuredOutputs",
+        "LLMEngineering"
+      ],
+      "companies": [
+        "anthropic",
+        "openai",
+        "scaleai"
+      ],
+      "level": "AI Engineer / SDE II"
     },
     {
       "hook": "\"It looks better\" is not an eval. Here is what is.",
@@ -211,8 +668,27 @@
       "answer": "Build an eval set before changing anything: 100-300 real inputs with expected outputs or rubric criteria, covering the failure modes you've seen. Run every prompt/model change against it.\n\nGraders: exact/contains checks where possible; an LLM-as-judge with a written rubric for open-ended answers — but validate the judge against human labels first (judges prefer longer answers and their own style).\n\nTrack pass rate per category, not one number, and gate deploys on 'no category regresses'. Then sample production traffic weekly to grow the set.",
       "complexity": "A 200-case eval runs in minutes and saves days",
       "takeaway": "No eval set, no prompt change.",
-      "visual": {"kind": "boxes", "items": ["Collect real inputs", "Label / rubric", "Run change", "Grade (rules + judge)", "Compare per category", "Ship or revert"]},
-      "tags": ["Evals", "LLMOps"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Collect real inputs",
+          "Label / rubric",
+          "Run change",
+          "Grade (rules + judge)",
+          "Compare per category",
+          "Ship or revert"
+        ]
+      },
+      "tags": [
+        "Evals",
+        "LLMOps"
+      ],
+      "companies": [
+        "openai",
+        "anthropic",
+        "google"
+      ],
+      "level": "Senior AI Engineer"
     },
     {
       "hook": "One protocol, any tool, any model. That is the pitch — here is what it actually standardizes.",
@@ -221,8 +697,26 @@
       "answer": "MCP standardizes how an AI application discovers and calls external capabilities: a server exposes TOOLS (functions with JSON-schema inputs), RESOURCES (readable data) and PROMPTS (templates); a client (Claude, an IDE, your agent) lists them at runtime and calls them over a common transport (stdio or HTTP).\n\nWhy not REST: the model needs machine-readable descriptions it can reason over, consistent error semantics, and a discovery step — MCP gives you that once, and any MCP-capable host can use your server without custom glue.\n\nDesign tip: name tools by intent (search_orders, not GET /orders), return concise, model-friendly text, and keep the number of tools small.",
       "complexity": "One server → many hosts; discovery at runtime",
       "takeaway": "MCP is to tools what USB is to devices: a plug, not a product.",
-      "visual": {"kind": "boxes", "items": ["AI host (Claude / IDE / agent)", "MCP client", "MCP server", "Tools · Resources · Prompts", "Your system"]},
-      "tags": ["MCP", "Agents"]
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "AI host (Claude / IDE / agent)",
+          "MCP client",
+          "MCP server",
+          "Tools · Resources · Prompts",
+          "Your system"
+        ]
+      },
+      "tags": [
+        "MCP",
+        "Agents"
+      ],
+      "companies": [
+        "anthropic",
+        "microsoft",
+        "cursor"
+      ],
+      "level": "AI Engineer / SDE II"
     }
   ],
   "papers": [
@@ -233,9 +727,36 @@
       "answer": "Bought: every token can look at every other token in ONE step (constant path length instead of O(n) through a recurrence), and all positions are computed in parallel — which is why training scales on GPUs and why context can be long.\n\nCost: attention is O(n²) in sequence length for compute and memory, and the model has no built-in order — hence positional encodings.\n\nWhy it mattered: the parallelism made it practical to train much bigger models on much more data, which is the whole story of the following years.",
       "complexity": "Attention: O(n²·d) per layer; RNN: O(n·d²) but sequential",
       "takeaway": "Parallelism over sequence length is what made scale possible.",
-      "visual": {"kind": "compare", "left": {"title": "RNN / LSTM", "points": ["sequential over tokens", "long-range info decays", "hard to parallelize"]}, "right": {"title": "Transformer", "points": ["all tokens at once", "direct token-to-token paths", "O(n²) attention cost"]}},
+      "visual": {
+        "kind": "compare",
+        "left": {
+          "title": "RNN / LSTM",
+          "points": [
+            "sequential over tokens",
+            "long-range info decays",
+            "hard to parallelize"
+          ]
+        },
+        "right": {
+          "title": "Transformer",
+          "points": [
+            "all tokens at once",
+            "direct token-to-token paths",
+            "O(n²) attention cost"
+          ]
+        }
+      },
       "url": "https://arxiv.org/abs/1706.03762",
-      "tags": ["Transformers", "DeepLearning"]
+      "tags": [
+        "Transformers",
+        "DeepLearning"
+      ],
+      "companies": [
+        "google",
+        "openai",
+        "meta"
+      ],
+      "level": "all levels"
     },
     {
       "hook": "10,000× fewer trainable parameters, same quality. The paper that made fine-tuning cheap.",
@@ -244,9 +765,24 @@
       "answer": "Idea: the weight change needed to adapt a pretrained model has low intrinsic rank, so instead of updating W (d×d) you learn A (d×r) and B (r×d) with r ≪ d and use W + BA. Trainable parameters drop by orders of magnitude (the paper reports ~10,000× for GPT-3 175B) and GPU memory ~3×; at inference BA can be merged into W, so zero added latency.\n\nWhen not to: when the task needs new knowledge rather than new behavior (LoRA adapts style/format well, facts poorly — use retrieval), or when you need to change the tokenizer/vocabulary.\n\nUse cases today: one base model + many small adapters per customer or task, swapped at request time.",
       "complexity": "Adapter size: 2·d·r per layer instead of d²",
       "takeaway": "Adapt behavior with LoRA; add knowledge with retrieval.",
-      "visual": {"kind": "metric", "big": "10,000×", "small": "fewer trainable parameters (GPT-3)", "big2": "0 ms", "small2": "added inference latency after merge"},
+      "visual": {
+        "kind": "metric",
+        "big": "10,000×",
+        "small": "fewer trainable parameters (GPT-3)",
+        "big2": "0 ms",
+        "small2": "added inference latency after merge"
+      },
       "url": "https://arxiv.org/abs/2106.09685",
-      "tags": ["LoRA", "FineTuning"]
+      "tags": [
+        "LoRA",
+        "FineTuning"
+      ],
+      "companies": [
+        "microsoft",
+        "meta",
+        "databricks"
+      ],
+      "level": "ML Engineer / Researcher"
     },
     {
       "hook": "Add five words to a prompt and a 540B model learns to do math. That paper.",
@@ -255,9 +791,36 @@
       "answer": "Why: generating intermediate steps lets the model spend more compute per answer and condition each step on the previous ones — decomposing a multi-step problem into steps it can do reliably. The effect appears only above a certain model size (an 'emergent' behavior in the paper).\n\nWhere it fails: tasks that don't decompose (lookup, style), small models (they produce fluent but wrong chains), and any setting where you trust the chain as an explanation — it's a generation, not a trace of the model's actual computation.\n\nToday: reasoning models train this behavior in and let you control the thinking budget instead of prompting for it.",
       "complexity": "More output tokens per answer = more latency and cost",
       "takeaway": "Give the model room to compute; verify the answer, not the story.",
-      "visual": {"kind": "compare", "left": {"title": "Direct answer", "points": ["one shot", "cheap", "fails on multi-step math"]}, "right": {"title": "Chain of thought", "points": ["steps before answer", "more tokens", "large jump on reasoning tasks"]}},
+      "visual": {
+        "kind": "compare",
+        "left": {
+          "title": "Direct answer",
+          "points": [
+            "one shot",
+            "cheap",
+            "fails on multi-step math"
+          ]
+        },
+        "right": {
+          "title": "Chain of thought",
+          "points": [
+            "steps before answer",
+            "more tokens",
+            "large jump on reasoning tasks"
+          ]
+        }
+      },
       "url": "https://arxiv.org/abs/2201.11903",
-      "tags": ["Prompting", "Reasoning"]
+      "tags": [
+        "Prompting",
+        "Reasoning"
+      ],
+      "companies": [
+        "google",
+        "openai",
+        "anthropic"
+      ],
+      "level": "all levels"
     },
     {
       "hook": "The paper behind every 'chat with your documents' product.",
@@ -266,9 +829,28 @@
       "answer": "Problem: a language model's knowledge is frozen at training time and stored opaquely in weights — it can't cite, can't update, and hallucinates specifics. RAG retrieves relevant passages (dense retrieval over Wikipedia in the paper) and conditions the generator on them, so knowledge lives in an index you can update and inspect.\n\nWhat changed: the original trained retriever and generator jointly; today most systems use an off-the-shelf embedding model + vector index + a frozen LLM, add reranking and hybrid search, and put the effort into chunking and evaluation instead of training.\n\nUse cases: internal knowledge assistants, support bots, code search, anything where the answer must be grounded in a source.",
       "complexity": "Index updates are cheap; retraining is not",
       "takeaway": "Put knowledge in an index, not in the weights.",
-      "visual": {"kind": "boxes", "items": ["Question", "Embed", "Vector index", "Top-k passages", "LLM + passages", "Grounded answer"]},
+      "visual": {
+        "kind": "boxes",
+        "items": [
+          "Question",
+          "Embed",
+          "Vector index",
+          "Top-k passages",
+          "LLM + passages",
+          "Grounded answer"
+        ]
+      },
       "url": "https://arxiv.org/abs/2005.11401",
-      "tags": ["RAG", "NLP"]
+      "tags": [
+        "RAG",
+        "NLP"
+      ],
+      "companies": [
+        "meta",
+        "openai",
+        "google"
+      ],
+      "level": "all levels"
     },
     {
       "hook": "Same compute, better model — because everyone was training on too little data.",
@@ -277,9 +859,24 @@
       "answer": "Finding: for a fixed compute budget, model size and training tokens should scale roughly equally — about 20 tokens per parameter. A 70B model trained on 1.4T tokens beat a 280B model trained on 300B tokens at the same compute.\n\nImplications: smaller models trained longer are cheaper to serve (inference cost scales with parameters, not training tokens), which is why later open models are 'small but trained on many trillions of tokens'.\n\nFor practitioners: when comparing models, look at training tokens, not just parameter count; and for fine-tuning, data quantity matters more than you think.",
       "complexity": "Rule of thumb: ~20 training tokens per parameter (compute-optimal)",
       "takeaway": "Parameters are not the metric; tokens-per-parameter is.",
-      "visual": {"kind": "metric", "big": "~20", "small": "training tokens per parameter", "big2": "70B", "small2": "beat 280B at equal compute"},
+      "visual": {
+        "kind": "metric",
+        "big": "~20",
+        "small": "training tokens per parameter",
+        "big2": "70B",
+        "small2": "beat 280B at equal compute"
+      },
       "url": "https://arxiv.org/abs/2203.15556",
-      "tags": ["ScalingLaws", "LLM"]
+      "tags": [
+        "ScalingLaws",
+        "LLM"
+      ],
+      "companies": [
+        "google",
+        "anthropic",
+        "nvidia"
+      ],
+      "level": "ML Engineer / Researcher"
     }
   ]
 }

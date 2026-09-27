@@ -54,6 +54,41 @@ VISUAL_KINDS = ["array", "code", "boxes", "graph", "tree", "metric", "compare", 
 FOLLOW_CTA = ("➕ Follow me for a DSA, system design, ML and AI engineering question every day "
               "— plus every new tech job with the pay range.")
 
+# Companies whose interview loops are known for each track (all have verified
+# LinkedIn org URNs in linkedin_autopost.ORG_URNS, so they become blue @tags).
+# The generator picks 2-3 per post; these are the allowed sets + rotation order.
+COMPANY_POOLS = {
+    "dsa":    ["microsoft", "amazon", "google", "meta", "apple", "netflix", "nvidia", "stripe", "databricks", "ibm"],
+    "sd":     ["amazon", "google", "microsoft", "netflix", "stripe", "meta", "apple", "databricks", "ibm", "nvidia"],
+    "mlsd":   ["meta", "google", "netflix", "amazon", "openai", "microsoft", "nvidia", "databricks", "scaleai", "apple"],
+    "ai":     ["openai", "anthropic", "microsoft", "google", "databricks", "scaleai", "cursor", "meta", "amazon", "ramp"],
+    "papers": ["openai", "anthropic", "google", "meta", "nvidia", "microsoft", "apple", "amazon", "databricks", "xai"],
+}
+ROUND_NAME = {"dsa": "DSA rounds", "sd": "system design rounds", "mlsd": "ML system design rounds",
+              "ai": "AI engineering interviews", "papers": "research & applied-AI interviews"}
+LEVEL_DEFAULT = {
+    "dsa":    {"easy": "SDE I / SDE II", "medium": "SDE II / Senior", "hard": "Senior / Staff"},
+    "sd":     {"easy": "SDE II / Senior", "medium": "Senior / Staff", "hard": "Staff / Principal / Director"},
+    "mlsd":   {"easy": "ML Engineer / Applied Scientist", "medium": "Senior ML Engineer", "hard": "Staff ML / ML Lead"},
+    "ai":     {"easy": "AI Engineer / SDE II", "medium": "Senior AI Engineer", "hard": "Staff / Lead AI Engineer"},
+    "papers": {"easy": "all levels", "medium": "ML Engineer / Researcher", "hard": "Senior Researcher / Staff"},
+}
+
+_BOLD = {}
+for _i, _ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+    _BOLD[_ch] = chr(0x1D5D4 + _i)              # mathematical sans-serif bold capital
+for _i, _ch in enumerate("abcdefghijklmnopqrstuvwxyz"):
+    _BOLD[_ch] = chr(0x1D5EE + _i)
+for _i, _ch in enumerate("0123456789"):
+    _BOLD[_ch] = chr(0x1D7EC + _i)
+
+
+def bold(text):
+    """LinkedIn has no rich text; Unicode sans-serif-bold letters are the
+    standard trick for bold in a post. Used only for the hook and section
+    headers so the rest stays searchable and readable."""
+    return "".join(_BOLD.get(ch, ch) for ch in str(text))
+
 GUIDE = {
     "dsa": ("Pick ONE classic algorithmic problem (two pointers, sliding window, prefix sums, binary search "
             "incl. 'binary search on the answer', BFS/DFS, topological sort, union-find, heaps, tries, "
@@ -243,11 +278,20 @@ def validate(item, track):
     opts = item.get("options") if isinstance(item.get("options"), list) else []
     opts = [str(o).strip()[:80] for o in opts][:4]
     tags = [re.sub(r"[^A-Za-z0-9]", "", str(t)) for t in (item.get("tags") or []) if str(t).strip()][:3]
+    allowed = COMPANY_POOLS.get(track, [])
+    companies = []
+    for c in (item.get("companies") or []):
+        key = re.sub(r"[^a-z]", "", str(c).lower())
+        if key in allowed and key not in companies:
+            companies.append(key)
+    companies = companies[:3]
+    level = re.sub(r"\s+", " ", str(item.get("level") or "")).strip(" .")[:48]
     return {"id": _item_id(track, q), "track": track, "hook": hook[:120], "question": q[:420],
             "options": opts, "answer": a[:1400], "code": code, "complexity": str(item.get("complexity") or "")[:120],
             "takeaway": str(item.get("takeaway") or "")[:180], "difficulty": diff, "visual": vis,
             "tags": tags, "url": str(item.get("url") or "")[:300], "source": str(item.get("source") or "")[:80],
-            "topic": str(item.get("topic") or "")[:80], "created": _now().isoformat()}
+            "topic": str(item.get("topic") or "")[:80], "companies": companies, "level": level,
+            "created": _now().isoformat()}
 
 
 def seed_items(track):
@@ -359,10 +403,15 @@ def generate_one(store, track, sec=None, state=None, paper=None, topic=None, sha
         "Return ONLY a JSON object with these keys:\n"
         "hook (string <= 90 chars), question (string, self-contained, <= 400 chars), "
         "options (array of 0-4 short strings, only when a multiple-choice framing makes people comment), "
-        "difficulty ('easy'|'medium'|'hard'), answer (string, <= 1200 chars, plain text with numbered steps "
-        "or short paragraphs, newlines allowed), code (string, Python, <= 14 lines, or empty), "
+        "difficulty ('easy'|'medium'|'hard'), "
+        "answer (string, <= 550 chars: first line 'Key idea: ...', then at most 3 numbered steps, each one "
+        "line; no code inside answer), code (string, Python, <= 10 lines, or empty), "
         "complexity (string, e.g. 'Time O(n) · Space O(1)', or a key number for design topics), "
         "takeaway (one sentence), tags (2-3 CamelCase hashtags without #), "
+        f"companies (array of 2-3 keys from {json.dumps(COMPANY_POOLS[track])} whose interview loops are known "
+        "to ask this kind of question; be truthful — pick companies where this topic is commonly reported), "
+        "level (string, the roles/levels this is typically asked for, e.g. 'SDE II / Senior' or "
+        "'Staff / Principal' or 'all levels'), "
         "visual (object: one of " + json.dumps(VISUAL_KINDS) + " — schemas: "
         "{kind:'array', values:[numbers or short strings], highlight:[indices], pointers:{index:'label'}, caption:''} | "
         "{kind:'code', lang:'python', code:'<= 12 short lines'} | {kind:'boxes', items:['4-6 labels']} | "
@@ -403,10 +452,19 @@ def pool(store):
     return {t: list(p.get(t, [])) for t in TRACKS}
 
 
+def _logo_loader():
+    try:
+        import jobs
+        return jobs.logo_loader
+    except Exception:
+        return None
+
+
 def _render_and_store(store, item):
     import edu_cards
     number = item.get("number")
-    png = edu_cards.render(item["track"], item["question"], item.get("visual"), number, item.get("difficulty"))
+    png = edu_cards.render(item["track"], item["question"], item.get("visual"), number, item.get("difficulty"),
+                           companies=companies_for(item, number), logo_loader=_logo_loader())
     blob = CARDS + item["id"] + ".png"
     store.upload_blob(blob, png, overwrite=True)
     item["card_blob"] = blob
@@ -518,28 +576,83 @@ def regenerate(store, tracks=None, budget_s=540):
 
 # ---------- caption ----------
 
-def caption(item):
+def companies_for(item, number=None):
+    """The 2-3 companies to name: the generator's pick, else a rotation over the
+    track's pool (so the same three aren't tagged all day)."""
+    got = [c for c in (item.get("companies") or []) if c in COMPANY_POOLS.get(item["track"], [])]
+    if len(got) >= 2:
+        return got[:3]
+    pool = COMPANY_POOLS.get(item["track"], [])
+    n = int(number or item.get("number") or 0)
+    extra = [pool[(n * 3 + k) % len(pool)] for k in range(3)] if pool else []
+    return (got + [c for c in extra if c not in got])[:3]
+
+
+def level_for(item):
+    return item.get("level") or LEVEL_DEFAULT[item["track"]].get(item.get("difficulty") or "medium", "all levels")
+
+
+def _short_answer(answer, limit=600):
+    """Key idea + up to 3 steps; the hook does the selling, the answer stays tight."""
+    lines = [l.rstrip() for l in (answer or "").splitlines() if l.strip()]
+    out, steps = [], 0
+    for l in lines:
+        if re.match(r"^\s*\d+[.)]", l):
+            steps += 1
+            if steps > 3:
+                continue
+        out.append(l)
+    txt = "\n".join(out)
+    if len(txt) > limit:
+        txt = txt[:limit].rsplit(" ", 1)[0].rstrip(" ,;:") + "\u2026"
+    return txt
+
+
+def caption_parts(item, include_code=False):
+    """Returns (text, mentions) — mentions are (display_name, org_urn) for the
+    companies named in the 'Asked at' line, so they become blue @tags."""
+    import card_builder, linkedin_autopost as la
     t = item["track"]
-    lines = [item["hook"], "", f"\U0001F9E9 {item['question']}"]
+    comps = companies_for(item)
+    names = [card_builder.display_name(c) for c in comps]
+    mentions = [(card_builder.display_name(c), la.ORG_URNS[c]) for c in comps if la.ORG_URNS.get(c)]
+    if len(names) >= 2:
+        asked = f"\U0001F3E2 Asked in {ROUND_NAME[t]} at companies like " + ", ".join(names[:-1]) + f" and {names[-1]}"
+    elif names:
+        asked = f"\U0001F3E2 Asked in {ROUND_NAME[t]} at companies like {names[0]}"
+    else:
+        asked = ""
+    body = _short_answer(item["answer"])
+    if body.lower().startswith("key idea:"):
+        body = bold("Key idea:") + body[len("key idea:"):]
+    lines = [bold(item["hook"]), "", f"\U0001F9E9 {item['question']}"]
     if item.get("options"):
-        lines.append("")
-        lines += [f"  {o}" for o in item["options"]]
-    lines += ["", "\U0001F4AC Comment your answer BEFORE you expand this post.", "",
-              "─── Answer ───", "", item["answer"]]
-    if item.get("code"):
-        lines += ["", "\U0001F40D Code:", item["code"]]
+        lines += [""] + [f"  {o}" for o in item["options"]]
+    lines.append("")
+    if asked:
+        lines.append(asked)
+    lines.append(f"\U0001F3AF {bold('Level:')} {level_for(item)}")
+    lines += ["", "\U0001F4AC Comment your approach before you expand \U0001F447", "",
+              "\u2501\u2501\u2501 " + bold("Answer") + " \u2501\u2501\u2501", body]
+    if include_code and item.get("code"):
+        lines += ["", "\U0001F40D " + bold("Code"), item["code"]]
     if item.get("complexity"):
-        lines += ["", f"⏱ {item['complexity']}"]
+        lines += ["", f"\u23F1 {item['complexity']}"]
     if item.get("takeaway"):
-        lines += ["", f"\U0001F511 Takeaway: {item['takeaway']}"]
+        lines += ["", f"\U0001F511 {bold('Takeaway:')} {item['takeaway']}"]
     if t == "papers" and item.get("url"):
         lines += ["", f"\U0001F4C4 Paper: {item['url']}"]
-    lines += ["", FOLLOW_CTA, "♻️ Repost to help someone prepping this week.", "",
-              TRACK_TAGS[t] + "".join(f" #{x}" for x in item.get("tags", []) if x)]
+    lines += ["", FOLLOW_CTA, "\u267B\ufe0f Repost to help someone prepping this week.", "",
+              TRACK_TAGS[t] + "".join(f" #{x}" for x in item.get("tags", []) if x)
+              + "".join(f" #{n.replace(' ', '')}" for n in names)]
     cap = "\n".join(lines)
     if len(cap) > 2900:
         cap = cap[:2860].rsplit("\n", 1)[0] + "\n\n" + TRACK_TAGS[t]
-    return cap
+    return cap, mentions
+
+
+def caption(item, include_code=False):
+    return caption_parts(item, include_code)[0]
 
 
 # ---------- posting ----------
@@ -594,20 +707,22 @@ def post_one(store, track):
     if png is None:
         try:
             import edu_cards
-            png = edu_cards.render(track, item["question"], item.get("visual"), item.get("number"), item.get("difficulty"))
+            png = edu_cards.render(track, item["question"], item.get("visual"), item.get("number"), item.get("difficulty"),
+                                   companies=companies_for(item), logo_loader=_logo_loader())
         except Exception:
             png = None
-    text = caption(item)
+    include_code = str(_cfg(store).get("edu_code", "false")).lower() == "true"
+    text, mentions = caption_parts(item, include_code)
     title = f"{TRACK_NAMES[track]}: {item['hook'][:80]}"
     note = ""
     try:
         if png:
-            urn = linkedin_client.post_with_image(text, png, title=title)
+            urn = linkedin_client.post_with_image(text, png, title=title, mentions=mentions)
         else:
-            urn = linkedin_client.post_text(text)
+            urn = linkedin_client.post_text(text, mentions=mentions)
     except Exception as e:
         try:
-            urn = linkedin_client.post_text(text)
+            urn = linkedin_client.post_text(text, mentions=mentions)
             note = f" (text-only after: {str(e)[:80]})"
         except Exception as e2:
             # put it back so the content isn't lost

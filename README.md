@@ -85,8 +85,12 @@ python worker.py                # scheduler + /health on $PORT
 
 Every educational post is a **question card** (designed figure: array with
 pointers, code panel, flow boxes, agent graph, tree, metric, comparison,
-table — see `edu_cards.py`) with the **answer under LinkedIn's "…more" fold**
-and a "comment your answer before you expand" line. Questions are generated
+table — see `edu_cards.py`; the footer shows the logos of the companies named)
+with a bold hook, an "Asked in DSA rounds at companies like @Microsoft, @Amazon
+and @Google" line (real blue @tags, 2-3 companies picked per question from a
+per-track pool), the level it's asked for, and a **short answer under
+LinkedIn's "…more" fold** (key idea + 3 steps; code off by default, `edu_code`
+turns it on) after a "comment your approach before you expand" line. Questions are generated
 the night before by Azure OpenAI (`edu_content.py`, one call per item, real
 papers for the papers track), rendered and queued in `li_edu_pool.json`; if
 the pool is empty at post time they're generated on the fly, and if the LLM is

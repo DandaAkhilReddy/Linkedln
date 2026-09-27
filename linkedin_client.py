@@ -75,23 +75,32 @@ def _utf16_len(t):
     return len(t.encode("utf-16-le")) // 2
 
 
-def _commentary(text, mention=None):
-    """mention = (display_name, organization_urn) -> blue @tag on first occurrence."""
+def _commentary(text, mention=None, mentions=None):
+    """mention = (display_name, organization_urn) -> blue @tag on the first
+    whole-word occurrence; mentions = a list of them (each tagged once)."""
+    import re as _re
     body = {"text": text}
-    if mention:
-        name, org = mention
-        idx = text.find(name)
-        if idx >= 0 and org:
-            body["attributes"] = [{
-                "start": _utf16_len(text[:idx]),
-                "length": _utf16_len(name),
-                "value": {"com.linkedin.common.CompanyAttributedEntity":
-                          {"company": org}},
-            }]
+    attrs = []
+    taken = []
+    for name, org in ([mention] if mention else []) + list(mentions or []):
+        if not (name and org):
+            continue
+        m = None
+        for cand in _re.finditer(r"(?<![\w@#])" + _re.escape(name) + r"(?![\w])", text):
+            if all(cand.start() >= e or cand.end() <= s0 for s0, e in taken):
+                m = cand
+                break
+        if not m:
+            continue
+        taken.append((m.start(), m.end()))
+        attrs.append({"start": _utf16_len(text[:m.start()]), "length": _utf16_len(name),
+                      "value": {"com.linkedin.common.CompanyAttributedEntity": {"company": org}}})
+    if attrs:
+        body["attributes"] = sorted(attrs, key=lambda a: a["start"])
     return body
 
 
-def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None, mention=None):
+def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None, mention=None, mentions=None):
     """Publish a member post with one image. Returns the share URN."""
     token = token or _token()
     urn = urn or person_urn(token)
@@ -100,7 +109,7 @@ def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None, menti
     body = {
         "author": urn, "lifecycleState": "PUBLISHED",
         "specificContent": {"com.linkedin.ugc.ShareContent": {
-            "shareCommentary": _commentary(text, mention),
+            "shareCommentary": _commentary(text, mention, mentions),
             "shareMediaCategory": "IMAGE",
             "media": [{"status": "READY",
                        "description": {"text": title},
@@ -118,12 +127,12 @@ def post_with_image(text, png_bytes, title="Hiring", token=None, urn=None, menti
     return r.headers.get("x-restli-id", r.json().get("id", "ok"))
 
 
-def post_text(text, token=None, urn=None):
+def post_text(text, token=None, urn=None, mentions=None):
     token = token or _token()
     urn = urn or person_urn(token)
     body = {"author": urn, "lifecycleState": "PUBLISHED",
             "specificContent": {"com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {"text": text},
+                "shareCommentary": _commentary(text, None, mentions),
                 "shareMediaCategory": "NONE"}},
             "visibility": {"com.linkedin.ugc.MemberNetworkVisibility":
                            os.environ.get("LINKEDIN_VISIBILITY", "PUBLIC")}}
