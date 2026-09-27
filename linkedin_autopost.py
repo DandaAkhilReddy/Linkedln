@@ -295,7 +295,7 @@ def _generate_one(container, logo_loader, company, cfg, now, date_str, per_compa
     if not new:
         state["last_run"] = now.isoformat()
         _save(container, _li_state_blob(company), state)
-        notes.append(f"{company}: no new jobs")
+        notes.append(f"{company}: no new jobs (fetched {len(fresh)} in {hours}h, {len(posted)} already seen)")
         return
     # divide across up to cards_cap posts (1..jpc jobs each)
     chunks = card_builder.split_into(new, min(cards_cap, len(new)))
