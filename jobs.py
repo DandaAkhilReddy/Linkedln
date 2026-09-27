@@ -124,6 +124,7 @@ def drain():
     if track != "job":
         out += edu_content.post_one(store, track)
         if _posted(out):
+            healthcheck.record(store, "drain", True, f"edu {track}: " + out[0][:200])
             return out
     out += linkedin_autopost.drain(store)
     if _posted(out) or _held(out):
@@ -134,6 +135,7 @@ def drain():
         if _posted(out):
             return out
     out += filler.post_one(store)
+    healthcheck.record(store, "drain", _posted(out), out[-1][:200] if out else "no notes")
     return out
 
 
