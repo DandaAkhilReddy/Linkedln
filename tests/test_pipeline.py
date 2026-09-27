@@ -152,9 +152,10 @@ def test_linkedin_only_timers():
     import function_app as fa
     src = open(pathlib.Path(fa.__file__)).read()
     # emails disabled: only LinkedIn generate x3 + drain remain
-    assert src.count("timer_trigger") == 12  # 5 gen + drain + growth ask/poll + health + poll + 2 carousels
+    assert src.count("timer_trigger") == 20  # 5 gen + drain + catch-up + filler + 6 edu + growth ask/poll + health + poll + 2 carousels
     assert '"0 12 * * *"' in src and '"20 12 * * *"' in src and '"30 12 * * *"' in src
     assert '"5-55/10 * * * *"' in src         # drain every 10 min, offset from generates
+    assert '"0-50/10 * * * *"' in src         # catch-up timer for missed slots
     assert '"0 11 * * *"' not in src           # no email timers
     assert set(fa.GROUP_A + fa.GROUP_B + fa.GROUP_C + fa.GROUP_D + fa.GROUP_E) == set(fa.COMPANIES)
 
@@ -467,13 +468,111 @@ def test_health_assess_flags_gaps(tmp_path, monkeypatch):
 
 def test_drain_refills_when_queue_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    import jobs, linkedin_autopost as la
-    calls = []
+    import jobs, linkedin_autopost as la, filler, content_plan as cp
+    calls, fill = [], []
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (True, ""))
+    monkeypatch.setattr(cp, "pick", lambda store, now=None, targets=None: "job")
     monkeypatch.setattr(la, "drain", lambda store: ["queue empty"] if not calls else ["0 posted, 2 left"])
     monkeypatch.setattr(la, "generate", lambda store, loader, companies, hours: (calls.append(hours), [f"gen {hours}h"])[1])
+    monkeypatch.setattr(filler, "post_one", lambda store: (fill.append(1), ["posted filler news: x urn", "1 posted, 9 filler left"])[1])
     out = jobs.drain()
     assert calls and calls[0] == 24                      # refill kicked in with the 24h window
     assert any("refill" in n for n in out)
+    assert fill == [1] and jobs._posted(out)             # ...and the slot was still filled
+
+
+def test_drain_guarantee_chain(tmp_path, monkeypatch):
+    """Jobs first; filler only when nothing postable; never when the gate says hold."""
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import jobs, linkedin_autopost as la, filler, content_plan as cp
+    fill = []
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (True, ""))
+    monkeypatch.setattr(cp, "pick", lambda store, now=None, targets=None: "job")
+    monkeypatch.setattr(la, "generate", lambda store, loader, companies, hours: ["x: no new jobs"])
+    monkeypatch.setattr(filler, "post_one", lambda store: (fill.append(1), ["posted filler chart: y urn", "1 posted, 0 filler left"])[1])
+    monkeypatch.setattr(la, "drain", lambda store: ["queue empty"])
+    assert jobs._posted(jobs.drain()) and fill == [1]
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (False, "holding queue — volume: last post 3 min ago (< 10)"))
+    assert not jobs._posted(jobs.drain()) and fill == [1]          # gate: no filler
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (False, "daily cap 148 reached — resuming tomorrow"))
+    jobs.drain(); assert fill == [1]
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (True, ""))
+    monkeypatch.setattr(la, "drain", lambda store: ["posted ibm urn", "1 posted, 5 left"])
+    assert jobs._posted(jobs.drain()) and fill == [1]              # job posted: no filler
+    monkeypatch.setattr(la, "drain", lambda store: ["ibm failed (1): boom", "0 posted, 5 left"])
+    assert jobs._posted(jobs.drain()) and fill == [1, 1]           # job post failed: filler saves the slot
+
+
+def test_catchup_only_when_primary_slot_missed(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import jobs, json, datetime as dt
+    s = jobs.posts_store()
+    ran = []
+    monkeypatch.setattr(jobs, "drain", lambda: (ran.append(1), ["1 posted, 1 left"])[1])
+    now = dt.datetime.now(dt.timezone.utc)
+    s.upload_blob("li_post_log.json", json.dumps([
+        {"ts": (now - dt.timedelta(minutes=4)).isoformat(), "variant": "salary_hook", "urn": "a"},
+        {"ts": (now - dt.timedelta(minutes=1)).isoformat(), "variant": "poll", "urn": "b"}]))
+    assert not ran and "not needed" in jobs.drain_catchup()[0]
+    s.upload_blob("li_post_log.json", json.dumps([
+        {"ts": (now - dt.timedelta(minutes=22)).isoformat(), "variant": "news", "urn": "a"},
+        {"ts": (now - dt.timedelta(minutes=2)).isoformat(), "variant": "carousel", "urn": "b"}]))  # extras don't count
+    assert "missed" in jobs.drain_catchup()[0] and ran == [1]
+
+
+def test_slot_clock_ignores_polls_and_carousels_and_post_after(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import json, datetime as dt, linkedin_autopost as la, linkedin_client, strategy, function_app as fa
+    la._set_companies(fa.COMPANIES)
+    now = dt.datetime.now(dt.timezone.utc)
+    plog = [{"ts": (now - dt.timedelta(minutes=30)).isoformat(), "variant": "grab_hook"},
+            {"ts": (now - dt.timedelta(minutes=1)).isoformat(), "variant": "poll"}]
+    assert abs((now - la._last_post_ts(plog)).total_seconds() - 1800) < 5
+    import jobs
+    s = jobs.posts_store()
+    s.upload_blob("li_secrets.json", json.dumps({"linkedin_autopost_enabled": "true", "access_token": "t", "person_urn": "urn:li:person:x"}))
+    s.upload_blob("li_post_log.json", json.dumps(plog))
+    s.upload_blob("li_cards/ibm_logo.png", b"png")
+    s.upload_blob("li_queue.json", json.dumps([{"company": "ibm", "card_blob": "li_cards/ibm_logo.png", "caption": "c",
+                                                "variant": "salary_hook", "title": "IBM is hiring", "created": now.isoformat(),
+                                                "post_after": (now + dt.timedelta(hours=3)).isoformat()}]))
+    monkeypatch.setattr(linkedin_client, "post_with_image", lambda *a, **k: "urn:li:share:1")
+    out = la.drain(s)
+    assert any(n.startswith("1 posted") for n in out)     # future post_after no longer blocks the slot
+    assert la.DAILY_CAP == 148
+
+
+def test_filler_feeds_captions_and_images(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import json, filler, linkedin_autopost as la, function_app as fa
+    la._set_companies(fa.COMPANIES)
+    rss = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Blog</title>
+      <item><title>Faster inference with &amp; without GPUs</title><link>https://example.com/a</link>
+      <description><![CDATA[<p>Some <b>html</b> text</p>]]></description><pubDate>Fri, 11 Sep 2026 10:00:00 GMT</pubDate></item>
+      </channel></rss>"""
+    atom = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>F</title>
+      <entry><title>New model release</title><link rel="alternate" href="https://example.com/b"/>
+      <summary>abstract here</summary><published>2026-09-11T09:00:00Z</published></entry></feed>"""
+    r, a = filler.parse_feed(rss), filler.parse_feed(atom)
+    assert r[0]["title"] == "Faster inference with & without GPUs" and r[0]["snippet"] == "Some html text"
+    assert r[0]["when"].year == 2026 and a[0]["url"] == "https://example.com/b" and a[0]["when"].hour == 9
+    item = {"kind": "news", "title": "New model release", "url": "https://example.com/b", "source": "OpenAI",
+            "company": "openai", "summary": "Short original summary."}
+    cap = filler.caption_for(item)
+    assert "Follow me" in cap and "https://example.com/b" in cap and "From OpenAI" in cap and "#OpenAI" in cap
+    png = filler.news_card_png("news", item["title"], "OpenAI", None)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    # charts need our pay facts
+    s = __import__("storage").get_store("linkedin-posts")
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    facts = [{"ts": now, "company": c, "title": f"Software Engineer {i}", "loc": "Remote", "salary": "", "top": 200000 + i * 10000, "url": f"https://x/{c}/{i}"}
+             for c in ("openai", "google", "stripe", "ibm", "amd", "ramp") for i in range(3)]
+    s.upload_blob("li_jobfacts.json", json.dumps(facts))
+    charts = filler.chart_candidates(s)
+    ids = [c[0] for c in charts]
+    assert "top_by_company" in ids and "roles_with_pay" in ids and "median_swe" in ids
+    png2 = filler.bar_chart_png(charts[0][1], charts[0][2], charts[0][3], charts[0][4])
+    assert png2[:8] == b"\x89PNG\r\n\x1a\n" and "Follow me" in filler.chart_caption(charts[0])
 
 
 def test_schedule_has_health_job():
@@ -548,18 +647,18 @@ def test_strategy_blocks_credit_and_override(tmp_path, monkeypatch):
     import storage, strategy as st, json
     s = storage.get_store("linkedin-posts")
     d0 = st.START
-    assert st.arm_for(s, d0) == "volume" and st.arm_for(s, d0 + datetime.timedelta(days=2)) == "volume"
-    assert st.arm_for(s, d0 + datetime.timedelta(days=3)) == "prime"          # next block explores
-    # credit a 3-day gain to the volume block, 3-day gain to prime
+    # Reddy's rule: auto mode is always the 10-minute "volume" arm, block after block
+    for k in (0, 2, 3, 6, 9, 30):
+        assert st.arm_for(s, d0 + datetime.timedelta(days=k)) == "volume"
+    # a stale cached "prime" block (from before the rule) is recomputed, not honoured
+    st2 = st._load(s); st2["blocks"]["1"] = "prime"; st._save(s, st2)
+    assert st.arm_for(s, d0 + datetime.timedelta(days=3)) == "volume"
+    # credit still attributes gains to whatever arm was active on those days
     st.credit(s, d0, 15000, d0 + datetime.timedelta(days=3), 15090)
-    st.credit(s, d0 + datetime.timedelta(days=3), 15090, d0 + datetime.timedelta(days=6), 15300)
-    st2 = st._load(s)
-    assert st2["stats"]["volume"]["days"] == 3 and st2["stats"]["prime"]["gained"] == 210
-    # exploration complete -> block 2 exploits the better arm (prime, 70/day vs 30/day)
-    assert st.arm_for(s, d0 + datetime.timedelta(days=6)) == "prime"
-    assert st.arm_for(s, d0 + datetime.timedelta(days=9)) == "volume"         # every 4th block re-tests runner-up
-    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
-    assert st.arm_for(s, d0 + datetime.timedelta(days=6)) == "volume"         # manual override wins
+    st3 = st._load(s)
+    assert st3["stats"]["volume"]["days"] == 3 and st3["stats"]["volume"]["gained"] == 90
+    s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "prime"}))
+    assert st.arm_for(s, d0 + datetime.timedelta(days=6)) == "prime"          # explicit email override only
     assert "Scoreboard" in st.summary(s)
 
 
@@ -575,7 +674,7 @@ def test_should_post_respects_window_and_spacing(tmp_path, monkeypatch):
     assert not st.should_post(s, night_utc, None)[0]
     s.upload_blob("li_secrets.json", json.dumps({"strategy_arm": "volume"}))
     assert st.should_post(s, night_utc, night_utc - datetime.timedelta(minutes=10))[0]
-    assert st.expected(st.ARMS["prime"])[0] == 30 and st.expected(st.ARMS["volume"])[0] == 146
+    assert st.expected(st.ARMS["prime"])[0] == 31 and st.expected(st.ARMS["volume"])[0] == 147
 
 
 def test_log_count_dedupes_per_day_and_credits(tmp_path, monkeypatch):
@@ -636,3 +735,127 @@ def test_deck_themes_select_rank_and_render(tmp_path, monkeypatch):
     # a theme posted today is not repeated in the other slot
     s.upload_blob("li_post_log.json", json.dumps([{"ts": now, "variant": "carousel", "theme": "top_pay"}]))
     assert gp.plan_deck(s, "noon")[0] != "top_pay"
+
+
+# ---------- educational content: cards, planner, pool, captions ----------
+
+def _edu_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "file"); monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    import storage
+    return storage.get_store("linkedin-posts")
+
+
+def test_edu_cards_render_every_visual_kind():
+    import edu_cards as ec
+    specs = [
+        {"kind": "array", "values": [2, 7, 11, 15], "highlight": [0, 2], "pointers": {"0": "L", "3": "R"}, "caption": "t=13"},
+        {"kind": "code", "lang": "python", "code": "def f(a):\n    return sorted(a)[0]  # min"},
+        {"kind": "boxes", "items": ["Client", "API", "Service", "DB", "Cache"]},
+        {"kind": "graph", "nodes": ["plan", "act", "observe", "reflect"], "edges": [[0, 1], [1, 2], [2, 3], [3, 0]]},
+        {"kind": "tree", "values": [1, 2, 3, None, 4], "highlight": [2]},
+        {"kind": "metric", "big": "10,000×", "small": "fewer params", "big2": "3×", "small2": "less memory"},
+        {"kind": "compare", "left": {"title": "A", "points": ["x", "y"]}, "right": {"title": "B", "points": ["z"]}},
+        {"kind": "table", "header": ["", "A", "B"], "rows": [["mem", "O(1)", "O(n)"]]},
+        {"kind": "none"}, {"kind": "bogus"}, {"kind": "array", "values": []}, None,
+    ]
+    for i, v in enumerate(specs):
+        png = ec.render("dsa" if i % 2 else "ai", "A question long enough to wrap onto several lines of the card?", v, i + 1, "medium")
+        assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 5000
+
+
+def test_edu_seed_bank_is_valid_and_renders(tmp_path, monkeypatch):
+    import edu_content as ec, edu_cards
+    for track in ec.TRACKS:
+        items = ec.seed_items(track)
+        assert len(items) >= 5, track
+        for it in items:
+            assert it["track"] == track and it["hook"] and it["answer"] and it["visual"]["kind"] in ec.VISUAL_KINDS
+            cap = ec.caption(it)
+            assert it["hook"] in cap and "Answer" in cap and "Follow me" in cap and len(cap) <= 2900
+            assert edu_cards.render(track, it["question"], it["visual"], 1, it["difficulty"])[:4] == b"\x89PNG"
+        assert len({it["id"] for it in items}) == len(items)
+
+
+def test_edu_validate_and_json_parsing():
+    import edu_content as ec
+    raw = '```json\n{"hook": "Can you do it in O(n)?", "question": "Given an array of n integers find the duplicate in O(n) time.", '\
+          '"answer": "Use Floyd cycle detection on the index-value graph; the duplicate is the cycle entry. Works because values are in 1..n-1.", '\
+          '"visual": {"kind": "array", "values": [1,3,4,2,2]}, "difficulty": "Medium", "tags": ["Two Pointers", "arrays!"], "code": "x=1"}\n```'
+    it = ec.validate(ec._parse_json(raw), "dsa")
+    assert it and it["difficulty"] == "medium" and it["tags"] == ["TwoPointers", "arrays"] and it["id"].startswith("dsa-")
+    assert ec.validate({"hook": "x", "question": "short", "answer": "short"}, "dsa") is None
+    assert ec.validate(ec._parse_json("not json"), "sd") is None
+    bad = ec.validate({"hook": "A decent hook here", "question": "A long enough question text for the validator?",
+                       "answer": "A" * 80, "visual": {"kind": "nope"}}, "ai")
+    assert bad["visual"] == {"kind": "none"}
+
+
+def test_content_plan_quotas_spread_evenly(tmp_path, monkeypatch):
+    import json, datetime as dt, content_plan as cp, edu_content as ec
+    s = _edu_store(tmp_path, monkeypatch)
+    s.upload_blob("li_secrets.json", json.dumps({}))
+    day = dt.datetime(2026, 9, 28, 0, 5, tzinfo=dt.timezone.utc)
+    log = []
+    counts = {}
+    for k in range(144):                                   # simulate a full day of slots
+        now = day + dt.timedelta(minutes=10 * k)
+        s.upload_blob("li_post_log.json", json.dumps(log))
+        pick = cp.pick(s, now)
+        counts[pick] = counts.get(pick, 0) + 1
+        log.append({"ts": now.isoformat(), "variant": pick if pick != "job" else "salary_hook"})
+    assert all(counts[t] == 10 for t in ec.TRACKS), counts
+    assert counts["job"] == 94
+    # spread: the first 12 hours hold about half of every track (± 1)
+    first_half = [p["variant"] for p in log[:72]]
+    assert all(4 <= first_half.count(t) <= 6 for t in ec.TRACKS)
+    # disabled -> always jobs
+    s.upload_blob("li_secrets.json", json.dumps({"edu_enabled": "false"}))
+    s.upload_blob("li_post_log.json", json.dumps([]))
+    assert cp.pick(s, day) == "job"
+    s.upload_blob("li_secrets.json", json.dumps({"edu_dsa": 3, "edu_sd": 0, "edu_mlsd": 0, "edu_ai": 0, "edu_papers": 0}))
+    assert ec.targets(s)["dsa"] == 3 and ec.targets(s)["sd"] == 0
+
+
+def test_edu_post_one_uses_pool_then_seed_and_logs(tmp_path, monkeypatch):
+    import json, edu_content as ec, linkedin_client
+    s = _edu_store(tmp_path, monkeypatch)
+    s.upload_blob("li_secrets.json", json.dumps({}))               # no AOAI -> on-the-fly fails -> seed bank
+    posted = []
+    monkeypatch.setattr(linkedin_client, "post_with_image", lambda text, png, title="", **k: (posted.append((text, title)), "urn:li:share:9")[1])
+    out = ec.post_one(s, "sd")
+    assert out[-1].startswith("1 posted") and "seed" in out[0]
+    text, title = posted[0]
+    assert title.startswith("System Design:") and "Answer" in text
+    plog = json.loads(s.download_blob("li_post_log.json").readall())
+    assert plog[-1]["variant"] == "sd" and plog[-1]["urn"] == "urn:li:share:9"
+    # second call skips the used seed
+    out2 = ec.post_one(s, "sd")
+    assert posted[1][0] != text
+    # pool path: a prepared item is used first and removed
+    item = ec.seed_items("dsa")[0]; item["number"] = 7; item["card_blob"] = ""
+    s.upload_blob("li_edu_pool.json", json.dumps({"dsa": [item]}))
+    out3 = ec.post_one(s, "dsa")
+    assert "(pool)" in out3[0] and ec.pool(s)["dsa"] == []
+
+
+def test_drain_takes_edu_slot_then_falls_back_to_jobs(tmp_path, monkeypatch):
+    import jobs, linkedin_autopost as la, edu_content as ec, content_plan as cp, filler
+    _edu_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (True, ""))
+    monkeypatch.setattr(cp, "pick", lambda store, now=None, targets=None: "mlsd")
+    calls = []
+    monkeypatch.setattr(ec, "post_one", lambda store, track: (calls.append(track), ["posted edu mlsd #1 (pool): x urn", "1 posted, 9 mlsd left"])[1])
+    monkeypatch.setattr(la, "drain", lambda store: (calls.append("job"), ["posted ibm urn", "1 posted, 3 left"])[1])
+    assert jobs._posted(jobs.drain()) and calls == ["mlsd"]
+    monkeypatch.setattr(ec, "post_one", lambda store, track: (calls.append(track), ["edu mlsd failed: boom"])[1])
+    calls.clear()
+    assert jobs._posted(jobs.drain()) and calls == ["mlsd", "job"]      # edu failed -> job filled the slot
+    monkeypatch.setattr(la, "gate", lambda store, plog=None, now=None: (False, "holding queue — spacing"))
+    calls.clear()
+    assert not jobs._posted(jobs.drain()) and calls == []              # gate closed -> nothing
+
+
+def test_schedule_has_edu_timers():
+    import jobs
+    names = {n for n, _, _ in jobs.SCHEDULE}
+    assert {"edu_dsa", "edu_sd", "edu_mlsd", "edu_ai", "edu_papers", "edu_topup"} <= names

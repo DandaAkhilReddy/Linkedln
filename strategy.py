@@ -26,16 +26,19 @@ BLOCK_DAYS = 3
 START = datetime.date(2026, 9, 9)
 
 ARMS = {
-    "volume": {"label": "1 post / 10 min, 24/7 + daily poll + carousel",
+    "volume": {"label": "1 post / 10 min, 24/7 (guaranteed) + daily poll + 2 carousels",
                "spacing_min": 10, "window_et": None,
                "cards_per_company": 10, "jobs_per_card": 4,
                "poll": True, "carousel": True},
-    "prime":  {"label": "1 post / 30 min, 7am-9pm ET + daily poll + carousel",
+    "prime":  {"label": "1 post / 30 min, 7am-9pm ET + daily poll + 2 carousels",
                "spacing_min": 30, "window_et": (7, 21),
                "cards_per_company": 3, "jobs_per_card": 5,
                "poll": True, "carousel": True},
 }
-ORDER = ["volume", "prime"]
+# Reddy's rule (2026-09-12): 144 slots a day, one every 10 minutes, guaranteed.
+# The bandit therefore only ever auto-picks "volume"; "prime" stays available
+# as an explicit email override ("switch to prime") and nothing else.
+ORDER = ["volume"]
 DEFAULT_ARM = "volume"
 
 
@@ -92,8 +95,12 @@ def arm_for(store, day, st=None):
         return DEFAULT_ARM
     block = (day - START).days // BLOCK_DAYS
     cached = st["blocks"].get(str(block))
-    if cached in ARMS:
+    if cached in ORDER:                       # a cached arm that's no longer auto-eligible is recomputed
         return cached
+    if len(ORDER) == 1:
+        st["blocks"][str(block)] = ORDER[0]
+        _save(store, st)
+        return ORDER[0]
     stats = st["stats"]
     if any((stats.get(a) or {}).get("days", 0) < BLOCK_DAYS for a in ORDER):
         arm = ORDER[block % len(ORDER)]                       # explore
@@ -136,7 +143,7 @@ def should_post(store, now, last_post_ts):
 def expected(p):
     """(expected posts/day, max acceptable gap in minutes) for a policy."""
     hours = 24 if not p["window_et"] else (p["window_et"][1] - p["window_et"][0])
-    posts = int(hours * 60 / p["spacing_min"]) + int(p["poll"]) + int(p["carousel"])
+    posts = int(hours * 60 / p["spacing_min"]) + int(p["poll"]) + 2 * int(p["carousel"])
     gap = p["spacing_min"] * 4.5
     if p["window_et"]:
         gap = max(gap, (24 - hours) * 60 + p["spacing_min"] + 15)
@@ -174,10 +181,12 @@ def summary(store, now=None):
     block = max((day - START).days // BLOCK_DAYS, 0)
     next_switch = START + timedelta(days=(block + 1) * BLOCK_DAYS)
     lines = [f"Strategy now: {cur} — {ARMS[cur]['label']}",
-             f"Next block starts {next_switch.isoformat()} "
-             f"({'manual override' if _override(store) else 'auto-chosen from the scoreboard'})",
+             (f"Next block starts {next_switch.isoformat()} "
+              f"({'manual override' if _override(store) else 'auto-chosen from the scoreboard'})")
+             if len(ORDER) > 1 else
+             "Cadence is fixed at 1 post / 10 min (your rule); jobs first, news/charts fill any empty slot.",
              "Scoreboard (followers/day):"]
-    for a in ORDER:
+    for a in sorted(set(ORDER) | set(st["stats"])):
         r = _rate(st["stats"], a)
         d = (st["stats"].get(a) or {}).get("days", 0)
         lines.append(f"  - {a}: " + (f"{r:+.0f}/day over {d} day(s)" if r is not None else "no data yet"))

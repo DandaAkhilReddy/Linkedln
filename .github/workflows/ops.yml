@@ -1,0 +1,62 @@
+name: Ops (run from your phone)
+
+# Manual control without a laptop or Azure login: GitHub → Actions → "Ops" →
+# Run workflow → pick an action. Uses the HEALTH_URL secret (which carries the
+# function key) to call the app's HTTP routes and prints the result in the log.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        type: choice
+        required: true
+        default: health
+        options:
+          - health
+          - strategy
+          - heal
+          - drain
+          - catchup
+          - edu_plan
+          - edu_generate
+          - edu_post_dsa
+          - edu_post_sd
+          - edu_post_mlsd
+          - edu_post_ai
+          - edu_post_papers
+          - filler_refill
+          - filler
+          - poll_post
+          - carousel
+          - growth_ask
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the app
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -e
+          BASE="${HEALTH_URL%%/api/*}/api"
+          KEY="${HEALTH_URL##*code=}"
+          echo "::add-mask::$KEY"
+          case "$ACTION" in
+            health)        URL="$BASE/health?code=$KEY" ;;
+            strategy)      URL="$BASE/growth_run?action=strategy&code=$KEY" ;;
+            heal)          URL="$BASE/linkedin_run?action=heal&code=$KEY" ;;
+            drain)         URL="$BASE/linkedin_run?action=drain&code=$KEY" ;;
+            catchup)       URL="$BASE/linkedin_run?action=catchup&code=$KEY" ;;
+            edu_plan)      URL="$BASE/linkedin_run?action=edu_plan&code=$KEY" ;;
+            edu_generate)  URL="$BASE/linkedin_run?action=edu_generate&code=$KEY" ;;
+            edu_post_*)    URL="$BASE/linkedin_run?action=edu&track=${ACTION#edu_post_}&code=$KEY" ;;
+            filler_refill) URL="$BASE/linkedin_run?action=filler_refill&code=$KEY" ;;
+            filler)        URL="$BASE/linkedin_run?action=filler&code=$KEY" ;;
+            poll_post)     URL="$BASE/growth_run?action=poll_post&code=$KEY" ;;
+            carousel)      URL="$BASE/growth_run?action=carousel&code=$KEY" ;;
+            growth_ask)    URL="$BASE/growth_run?action=ask&code=$KEY" ;;
+          esac
+          echo "→ $ACTION"
+          curl -s --max-time 600 -w '\nHTTP %{http_code}\n' "$URL" | sed "s/$KEY/***/g"

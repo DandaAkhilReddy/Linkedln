@@ -3,9 +3,11 @@
 Scrapes new job openings from **17 tech companies** every morning and auto-posts
 them to a personal LinkedIn profile through the **official LinkedIn API** — one
 post every 10 minutes, around the clock, each with the company's logo, a
-salary hook, the @company tag, and apply links. A daily email check-in tracks
-follower growth, and you can steer the whole system by replying to that email
-from your phone (an LLM reads it and applies safe config changes).
+salary hook, the @company tag, and apply links. Fifty of the daily slots are educational Q&A
+posts (DSA, system design, ML system design, AI engineering, papers) with
+designed question cards. One daily email shows what went out and what's planned;
+reply to it from your phone to change anything (an LLM reads it and applies
+safe config changes).
 
 Companies: Microsoft, Apple, Google, Amazon, NVIDIA, Meta, OpenAI, Anthropic,
 Netflix, xAI, Databricks, Stripe, Scale AI, Ramp, Cursor, AMD, IBM.
@@ -24,11 +26,11 @@ early-career · engineering leadership · "who pays the most for a Software
 Engineer" leaderboard · weekly recap. A theme that lacks data falls back to the
 next one; roles already featured aren't repeated.
 
-Strategies are tested as **arms** in 3-day blocks (`strategy.py`): `volume`
-(1 post / 10 min, 24/7) vs `prime` (1 post / 30 min, 7am–9pm ET). The follower
-count you reply with each morning is credited to the arm that was active, and
-after both arms have data the bandit keeps the better one (re-testing the other
-every 4th block). Reply `switch to prime` / `back to volume` / `auto` to steer.
+Cadence is fixed at **1 post / 10 min, 24/7** (`strategy.py` arm `volume`; the
+bandit only auto-picks this one). The follower count you reply with each morning
+is credited to the active arm and shown as a scoreboard in every email. `prime`
+(1 post / 30 min, 7am–9pm ET) exists only as an explicit email override
+(`switch to prime`; `auto` or `back to volume` returns to the guarantee).
 
 ## How it works
 
@@ -65,7 +67,47 @@ python worker.py                # scheduler + /health on $PORT
 
 **Manual controls** (any host): `python worker.py run drain`, `python worker.py generate a 48`, `python worker.py status`. On Azure the same actions are HTTP routes (`linkedin_run`, `growth_run`).
 
+**Ops from your phone (no laptop, no Azure login):** GitHub → Actions → **Ops** → Run workflow → pick `health`, `strategy`, `heal`, `edu_plan`, `edu_generate`, `edu_post_dsa`, … — the result prints in the run log.
+
 **Steer from your phone:** reply to the daily "LinkedIn Growth Check-in" email with a number (logged, credited to the active strategy, analysed) or a sentence ("pause posting", "make it 5 per company", "switch to prime", "how's the queue?") — answered within 20 minutes, changes applied.
+
+## What a day looks like (144 slots, one every 10 minutes)
+
+| | per day | what |
+|---|---|---|
+| **DSA** | 10 | a problem with a concrete example → approach, complexity, Python |
+| **System design** | 10 | a scenario with numbers → components, the trade-off, back-of-envelope |
+| **ML system design** | 10 | feature stores, retrieval/ranking, evals, drift, imbalance… |
+| **AI engineering** | 10 | agent loops & graphs, tool calling, RAG, evals, MCP, caching… |
+| **Papers** | 10 | a real recent paper (HF daily papers / arXiv) → what changed, use cases |
+| **Jobs** | 94 | new roles at 17 companies with pay + @tag (the rest of the slots) |
+| + poll, 2 carousels | 3 | on top, outside the 10-minute clock |
+
+Every educational post is a **question card** (designed figure: array with
+pointers, code panel, flow boxes, agent graph, tree, metric, comparison,
+table — see `edu_cards.py`) with the **answer under LinkedIn's "…more" fold**
+and a "comment your answer before you expand" line. Questions are generated
+the night before by Azure OpenAI (`edu_content.py`, one call per item, real
+papers for the papers track), rendered and queued in `li_edu_pool.json`; if
+the pool is empty at post time they're generated on the fly, and if the LLM is
+down a hand-written seed bank (`edu_seed.json`) keeps the slot filled. The
+slot planner (`content_plan.py`) is quota-based: each track gets exactly its
+daily count spread evenly, jobs fill everything else, and a missed slot never
+shifts the plan. Change the mix or the style by replying to the daily email
+("more system design, fewer papers", "make DSA harder", "regenerate today").
+
+## The guarantee: 144 slots a day, one every 10 minutes
+
+`jobs.drain()` runs at :05, :15, … and always ends with a post:
+
+0. the slot planner decides: job card or one of the five Q&A tracks;
+   a Q&A slot posts from the pool → generated on the fly → seed bank, and
+   falls through to jobs if all of that fails;
+1. the next **job card** from the queue;
+2. queue empty → **refill** from all 17 companies with a widening lookback (24h → 72h → 7 days), retry;
+3. still nothing (or the job post failed) → an original **news card** (`filler.py`: the companies' own engineering/AI blogs, Hacker News via its official API, Hugging Face daily papers — headline + a summary in our own words + link, on an image we render) or a **pay chart** drawn from our own data (top of range by company, roles with pay by company, median SWE pay, pay by role type).
+
+A **catch-up timer** at :00, :10, … posts only if the primary slot was missed (deploy restart, timer hiccup), so a lost slot is recovered within 5 minutes. The news/chart backlog is refilled four times a day (`filler_refill`) and on demand. Polls and carousels are extra posts on top of the 144 and don't touch the 10-minute clock. Daily cap 148 (LinkedIn allows 150).
 
 ## Fallbacks & watchdog ("posting is mandatory")
 
@@ -89,7 +131,7 @@ python worker.py                # scheduler + /health on $PORT
 
 ```bash
 pip install -r requirements.txt pytest
-python -m pytest tests/ -v      # 50 tests: parsers, dedup, schedule parity, storage, cron, strategy, LTF
+python -m pytest tests/ -v      # 61 tests: parsers, dedup, schedule parity, storage, cron, strategy, LTF
 ```
 
 ## Notes

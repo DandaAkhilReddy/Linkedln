@@ -38,7 +38,7 @@ CARDS_PER_COMPANY = int(os.getenv("LINKEDIN_CARDS_PER_COMPANY", "10"))
 JOBS_PER_CARD = int(os.getenv("LINKEDIN_JOBS_PER_CARD", "4"))
 SPACING_MIN = int(os.getenv("LINKEDIN_SPACING_MIN", "10"))
 MAX_PER_DRAIN = int(os.getenv("LINKEDIN_MAX_PER_DRAIN", "1"))
-DAILY_CAP = int(os.getenv("LINKEDIN_DAILY_CAP", "145"))     # LinkedIn API: 150/member/day
+DAILY_CAP = int(os.getenv("LINKEDIN_DAILY_CAP", "148"))     # LinkedIn API: 150/member/day; 144 slots + poll + 2 carousels = 147
 STALE_HOURS = 36                                            # drop cards older than this
 
 # imported lazily to avoid circular import with function_app
@@ -361,8 +361,16 @@ def _finish_generate(container, queue, added, per_company, now, slot, notes):
         pass
 
 
+SLOT_VARIANTS = (set(HOOK_VARIANTS) | {"urgency_hook", "news", "hn", "paper", "chart"}
+                 | {"dsa", "sd", "mlsd", "ai", "papers"})
+
+
 def _last_post_ts(plog):
+    """When the last *slot* post went out (job cards + filler). Polls and
+    carousels are extra posts and don't count against the 10-minute clock."""
     for p in reversed(plog):
+        if p.get("variant") not in SLOT_VARIANTS:
+            continue
         try:
             t = datetime.datetime.fromisoformat(p["ts"])
             return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
@@ -371,31 +379,40 @@ def _last_post_ts(plog):
     return None
 
 
-def drain(container):
-    """Post due queue entries (up to MAX_PER_DRAIN). Returns notes."""
-    now = datetime.datetime.now(timezone.utc)
-    plog = _load(container, "li_post_log.json", [])
-    # hard daily cap (LinkedIn allows 150 posts/member/day)
+def gate(container, plog=None, now=None):
+    """May a slot post go out right now? (daily cap, strategy spacing/window,
+    kill switch). Shared by job cards, educational posts and filler.
+    Returns (ok, reason) — reasons keep the exact prefixes jobs._held() checks."""
+    now = now or datetime.datetime.now(timezone.utc)
+    plog = plog if plog is not None else _load(container, "li_post_log.json", [])
     today = now.date().isoformat()
     if sum(1 for p in plog if str(p.get("ts", "")).startswith(today)) >= DAILY_CAP:
-        return [f"daily cap {DAILY_CAP} reached — resuming tomorrow"]
-    # posting window + spacing come from the active strategy arm
+        return False, f"daily cap {DAILY_CAP} reached — resuming tomorrow"
     try:
         import strategy
         ok, why = strategy.should_post(container, now, _last_post_ts(plog))
     except Exception as e:
         ok, why = True, f"strategy unavailable ({e}); posting"
     if not ok:
-        return [f"holding queue — {why}"]
+        return False, f"holding queue — {why}"
+    if _cfg("linkedin_autopost_enabled", "false").lower() != "true":
+        return False, "autopost disabled"
+    return True, ""
+
+
+def drain(container):
+    """Post due queue entries (up to MAX_PER_DRAIN). Returns notes."""
+    now = datetime.datetime.now(timezone.utc)
+    plog = _load(container, "li_post_log.json", [])
+    ok, why = gate(container, plog, now)
+    if not ok:
+        return [why]
     # prune stale cards so a backlog never posts days-old roles
     q0 = _load(container, QUEUE_BLOB, [])
     cutoff_iso = (now - timedelta(hours=STALE_HOURS)).isoformat()
     q1 = [e for e in q0 if not e.get("created") or e["created"] >= cutoff_iso]
     if len(q1) != len(q0):
         _save(container, QUEUE_BLOB, q1)
-    if _cfg("linkedin_autopost_enabled", "false").lower() != "true":
-        return ["autopost disabled"]
-    now = datetime.datetime.now(timezone.utc)
     queue = _load(container, QUEUE_BLOB, [])
     if not queue:
         return ["queue empty"]
@@ -410,8 +427,9 @@ def drain(container):
         return [f"token failure: {e}"]
     remaining, posted, notes = [], 0, []
     for item in queue:
-        due = datetime.datetime.fromisoformat(item["post_after"]) <= now
-        if posted >= MAX_PER_DRAIN or not due:
+        # the 10-minute clock lives in strategy.should_post(); a card is never
+        # "not due yet" — an empty slot would break the guarantee
+        if posted >= MAX_PER_DRAIN:
             remaining.append(item)
             continue
         try:

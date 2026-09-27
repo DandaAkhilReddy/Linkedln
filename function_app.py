@@ -6,6 +6,8 @@ The schedules come from jobs.SCHEDULE so Azure and worker.py never drift.
 HTTP (function-key protected):
   linkedin_run?action=generate&group=a..e|company=<name>&hours=N
   linkedin_run?action=drain | heal            (heal = refill queue if empty, then post)
+  linkedin_run?action=filler | filler_refill | catchup   (news/chart backlog, missed-slot recovery)
+  linkedin_run?action=edu&track=dsa | edu_generate[&track=] | edu_plan   (educational Q&A posts)
   health                                       JSON status, 503 when something is wrong
   linkedin_run?action=testcard&company=<name>
   growth_run?action=ask|poll|poll_post|carousel|carousel_pm|strategy
@@ -64,6 +66,46 @@ def linkedin_drain(timer: func.TimerRequest) -> None:
     jobs.run("drain")
 
 
+@app.timer_trigger(schedule=_ncron("0-50/10 * * * *"), arg_name="timer", run_on_startup=False)
+def linkedin_drain_catchup(timer: func.TimerRequest) -> None:
+    jobs.run("drain_catchup")
+
+
+@app.timer_trigger(schedule=_ncron("40 11,17,23,5 * * *"), arg_name="timer", run_on_startup=False)
+def filler_refill(timer: func.TimerRequest) -> None:
+    jobs.run("filler_refill")
+
+
+@app.timer_trigger(schedule=_ncron("2 9 * * *"), arg_name="timer", run_on_startup=False)
+def edu_dsa(timer: func.TimerRequest) -> None:
+    jobs.run("edu_dsa")
+
+
+@app.timer_trigger(schedule=_ncron("12 9 * * *"), arg_name="timer", run_on_startup=False)
+def edu_sd(timer: func.TimerRequest) -> None:
+    jobs.run("edu_sd")
+
+
+@app.timer_trigger(schedule=_ncron("22 9 * * *"), arg_name="timer", run_on_startup=False)
+def edu_mlsd(timer: func.TimerRequest) -> None:
+    jobs.run("edu_mlsd")
+
+
+@app.timer_trigger(schedule=_ncron("32 9 * * *"), arg_name="timer", run_on_startup=False)
+def edu_ai(timer: func.TimerRequest) -> None:
+    jobs.run("edu_ai")
+
+
+@app.timer_trigger(schedule=_ncron("42 9 * * *"), arg_name="timer", run_on_startup=False)
+def edu_papers(timer: func.TimerRequest) -> None:
+    jobs.run("edu_papers")
+
+
+@app.timer_trigger(schedule=_ncron("2 21 * * *"), arg_name="timer", run_on_startup=False)
+def edu_topup(timer: func.TimerRequest) -> None:
+    jobs.run("edu_topup")
+
+
 @app.timer_trigger(schedule=_ncron("0 13 * * *"), arg_name="timer", run_on_startup=False)
 def growth_ask(timer: func.TimerRequest) -> None:
     jobs.run("growth_ask")
@@ -119,6 +161,19 @@ def linkedin_run(req: func.HttpRequest) -> func.HttpResponse:
             out = jobs.generate(target, hours)
         elif action == "heal":
             out = jobs.heal()
+        elif action == "filler":
+            out = jobs.filler.post_one(jobs.posts_store())
+        elif action == "filler_refill":
+            out = jobs.filler_refill()
+        elif action == "catchup":
+            out = jobs.drain_catchup()
+        elif action == "edu":                       # post one Q&A now: &track=dsa|sd|mlsd|ai|papers
+            out = jobs.edu_content.post_one(jobs.posts_store(), req.params.get("track", "dsa"))
+        elif action == "edu_generate":              # fill pools: &track=<one> or all
+            t = req.params.get("track")
+            out = jobs.edu_generate(t) if t else jobs.edu_generate_all()
+        elif action == "edu_plan":
+            out = [jobs.content_plan.summary(jobs.posts_store()), jobs.edu_content.plan_text(jobs.posts_store())]
         elif action == "testcard":
             out = [f"test card posted: {jobs.test_card(req.params.get('company', 'microsoft'))}"]
         else:

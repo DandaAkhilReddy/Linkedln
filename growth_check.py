@@ -24,7 +24,10 @@ CHAT_BLOB = "chat_history.json"
 DEFAULT_GOAL = 200
 
 ALLOWED_ACTIONS = {"linkedin_autopost_enabled", "cards_per_company",
-                   "jobs_per_card", "log_followers", "strategy_arm"}
+                   "jobs_per_card", "log_followers", "strategy_arm",
+                   "edu_enabled", "edu_dsa", "edu_sd", "edu_mlsd", "edu_ai", "edu_papers",
+                   "style_notes", "regenerate_today"}
+EDU_COUNT_KEYS = ("edu_dsa", "edu_sd", "edu_mlsd", "edu_ai", "edu_papers")
 
 
 def _secrets(container):
@@ -102,16 +105,32 @@ def log_count(container, count, note):
             + _strategy_text(container))
 
 
+def _edu_texts(container):
+    """(what was posted in the last 24h, today's planned questions) — never raises."""
+    try:
+        import edu_content, content_plan
+        return (edu_content.posted_text(container),
+                content_plan.summary(container) + "\n" + edu_content.plan_text(container))
+    except Exception as e:
+        return (f"(digest unavailable: {e})", "")
+
+
 def send_ask(container):
+    """The one daily email: yesterday's posts, today's plan, follower ask,
+    and how to change things by replying. Nothing changes unless you reply."""
     log_ = _load_log(container)
     last = log_["entries"][-1] if log_["entries"] else None
     base = (f"Last logged: {last['followers']:,} on {last['date']}."
             if last else "No entries yet — this will be the baseline.")
-    body = ("Reply with just your current LinkedIn follower count (e.g. 15400) — "
-            "one number a day is what trains the strategy picker.\n\n"
-            f"{base}\n\n{_strategy_text(container)}\n\n"
-            "You can also reply in plain words: 'switch to prime', 'back to volume', "
-            "'auto', 'pause', 'status', 'how's the queue?'.\n\n— your jobs bot")
+    posted, plan = _edu_texts(container)
+    body = ("Reply with just your current LinkedIn follower count (e.g. 15400).\n\n"
+            f"{base}\n\n"
+            "\u2500\u2500 YESTERDAY \u2500\u2500\n" + posted + "\n\n"
+            "\u2500\u2500 TODAY'S PLAN (144 slots: 50 Q&A + jobs, one every 10 min) \u2500\u2500\n" + plan + "\n\n"
+            "\u2500\u2500 STRATEGY \u2500\u2500\n" + _strategy_text(container) + "\n\n"
+            "Want something different? Just reply in plain words, e.g. 'make DSA harder', "
+            "'more system design, fewer papers', 'regenerate today', 'pause posting', 'status'. "
+            "If you don't reply, everything stays exactly the same.\n\n\u2014 your jobs bot")
     return ["ask " + _send("\U0001F4C8 " + SUBJECT, body)]
 
 
@@ -221,16 +240,21 @@ def _chat_reply(container, subj, user_text):
         qlen = len(json.loads(container.download_blob("li_queue.json").readall()))
     except Exception:
         qlen = 0
-    cfg_now = {k: sec.get(k) for k in ("linkedin_autopost_enabled",
-                                       "cards_per_company", "jobs_per_card", "strategy_arm")}
+    cfg_now = {k: sec.get(k) for k in ("linkedin_autopost_enabled", "cards_per_company",
+                                       "jobs_per_card", "strategy_arm", "edu_enabled",
+                                       "style_notes") + EDU_COUNT_KEYS}
+    posted_txt, plan_txt = _edu_texts(container)
     system = (
         "You are the email assistant for Reddy's LinkedIn jobs auto-poster "
         "(posts new job openings from 17 tech companies — Microsoft, Apple, Google, "
         "Amazon, NVIDIA, Meta, OpenAI, Anthropic, Netflix, xAI, Databricks, Stripe, "
         "Scale AI, Ramp, Cursor, AMD, IBM — to his personal LinkedIn with logo cards, "
-        "salary hooks, @company tags, a follow CTA, plus one poll and one PDF "
-        "carousel a day). Strategy arms: 'volume' = 1 post/10 min 24/7; 'prime' = "
-        "1 post/30 min 7am-9pm ET; 'auto' = the bandit picks by followers/day. "
+        "salary hooks, @company tags, a follow CTA, plus one poll and two PDF "
+        "carousels a day). Reddy's rule: 144 slots/day, one every 10 minutes, "
+        "guaranteed — jobs first, and when no jobs are left an original AI/engineering "
+        "news card or a pay chart fills the slot. Strategy arms: 'volume' = the "
+        "10-minute cadence (default, auto always picks it); 'prime' = 1 post/30 min "
+        "7am-9pm ET, only if he explicitly asks; 'auto' = back to volume. "
         "Answer his email briefly and concretely (plain text, no markdown). "
         "Growth goal: 200 followers/day. Recent growth log: "
         + json.dumps(tail) + ". Cards queued right now: " + str(qlen) +
@@ -241,7 +265,13 @@ def _chat_reply(container, subj, user_text):
         "ACTION: {\"cards_per_company\": 4} using only these keys: "
         "linkedin_autopost_enabled ('true'/'false'), cards_per_company (1-10), "
         "jobs_per_card (2-6), log_followers (integer), strategy_arm "
-        "('volume'/'prime'/'auto'). Never invent other keys.")
+        "('volume'/'prime'/'auto'), edu_enabled ('true'/'false'), edu_dsa / edu_sd / "
+        "edu_mlsd / edu_ai / edu_papers (0-20 posts per day for DSA, system design, ML "
+        "system design, AI engineering, papers; default 10 each), style_notes (a short "
+        "free-text instruction the question generator must follow from now on, e.g. "
+        "'DSA: harder, graph problems; fewer emojis'), regenerate_today (true = throw away "
+        "today's prepared questions and generate fresh ones). Never invent other keys.\n"
+        "Educational posts yesterday:\n" + posted_txt[:1500] + "\nToday's plan:\n" + plan_txt[:1500])
     try:
         hist = json.loads(container.download_blob(CHAT_BLOB).readall())
     except Exception:
@@ -273,6 +303,20 @@ def _chat_reply(container, subj, user_text):
                         sec2.pop("strategy_arm", None); applied.append("strategy=auto")
                     elif arm in ("volume", "prime"):
                         sec2["strategy_arm"] = arm; applied.append(f"strategy_arm={arm}")
+                elif k in EDU_COUNT_KEYS:
+                    sec2[k] = max(0, min(20, int(v))); applied.append(f"{k}={sec2[k]}/day")
+                elif k == "edu_enabled":
+                    sec2[k] = str(v).lower(); applied.append(f"edu_enabled={sec2[k]}")
+                elif k == "style_notes":
+                    prev = str(sec2.get("style_notes") or "")
+                    sec2[k] = (prev + " | " + str(v)).strip(" |")[-600:]; applied.append("style notes saved")
+                elif k == "regenerate_today":
+                    if str(v).lower() in ("true", "1", "yes"):
+                        try:
+                            import edu_content
+                            edu_content.reset_pool(container); applied.append("today's questions regenerating")
+                        except Exception as e:
+                            applied.append(f"regenerate failed: {e}")
                 elif k == "cards_per_company":
                     sec2[k] = max(1, min(10, int(v))); applied.append(f"{k}={sec2[k]}")
                 elif k == "jobs_per_card":

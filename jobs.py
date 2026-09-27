@@ -10,16 +10,22 @@ SCHEDULE is the single source of truth for *when* things run (UTC, 5-field
 cron). Azure timers and the worker loop are both generated from it.
 """
 
-import logging
-import traceback
-
+import re
 import json
+import logging
+import datetime
+import traceback
+from datetime import timezone, timedelta
+
 import card_builder
 import linkedin_autopost
 import growth_check
 import growth_posts
 import healthcheck
 import strategy
+import filler
+import edu_content
+import content_plan
 import emailer
 from storage import get_store
 from companies import COMPANIES, GROUPS, GROUP_A, GROUP_B, GROUP_C, GROUP_D, GROUP_E
@@ -86,18 +92,81 @@ def ensure_queue(min_items=MIN_QUEUE):
     return notes
 
 
+def _posted(notes):
+    return any(re.match(r"^[1-9]\d* posted", n) for n in notes)
+
+
+def _held(notes):
+    """The gate said no (cap / spacing / window / disabled / token) — not a content problem."""
+    return any(n.startswith(("holding queue", "daily cap", "autopost disabled", "token failure"))
+               for n in notes)
+
+
 def drain():
-    """Post the next due card; if the queue ran dry, refill first (fallback)."""
-    out = linkedin_autopost.drain(posts_store())
+    """THE GUARANTEE — one post per slot, every 10 minutes:
+    0. the slot planner says whether this slot is a job card or one of the
+       educational tracks (10/day each, spread evenly);
+    1. educational slot -> post the next Q&A (pool → on-the-fly → seed bank);
+       if that fails, fall through to jobs so the slot is still filled;
+    2. next job card from the queue;
+    3. queue empty -> refill from all companies with a widening lookback, retry;
+    4. still nothing (or the job post failed) -> an original news/chart post
+       with an image from `filler`, so the slot is never skipped."""
+    store = posts_store()
+    ok, why = linkedin_autopost.gate(store)
+    if not ok:
+        return [why]
+    out = []
+    try:
+        track = content_plan.pick(store)
+    except Exception as e:
+        track, out = "job", [f"planner error ({str(e)[:60]}); job slot"]
+    if track != "job":
+        out += edu_content.post_one(store, track)
+        if _posted(out):
+            return out
+    out += linkedin_autopost.drain(store)
+    if _posted(out) or _held(out):
+        return out
     if any(n.startswith("queue empty") for n in out):
         out += ensure_queue()
-        out += linkedin_autopost.drain(posts_store())
+        out += linkedin_autopost.drain(store)
+        if _posted(out):
+            return out
+    out += filler.post_one(store)
     return out
+
+
+def edu_generate(track):
+    """Morning timers: fill one track's pool for the day (time-boxed)."""
+    return edu_content.ensure_pool(posts_store(), track)
+
+
+def edu_generate_all():
+    return edu_content.ensure_all(posts_store())
+
+
+def drain_catchup():
+    """Offset timer (:00, :10, ...). Only acts if the primary slot (:05, :15, ...)
+    was missed — a host restart during a deploy, a timer hiccup — so a lost
+    slot is recovered within 5 minutes instead of waiting for the next one."""
+    store = posts_store()
+    plog = linkedin_autopost._load(store, "li_post_log.json", [])
+    last = linkedin_autopost._last_post_ts(plog)
+    now = datetime.datetime.now(timezone.utc)
+    if last and now - last < timedelta(minutes=15):
+        return [f"catch-up not needed (last card {int((now - last).total_seconds() // 60)} min ago)"]
+    return ["catch-up: primary slot missed"] + drain()
+
+
+def filler_refill():
+    """Keep the news/chart backlog topped up (daily + every 6h)."""
+    return filler.refill(posts_store(), logo_loader=logo_loader)
 
 
 def heal():
     """Manual/automatic kick: refill if needed, then post one. Safe to call anytime."""
-    return ensure_queue() + linkedin_autopost.drain(posts_store())
+    return ensure_queue() + drain()
 
 
 def health():
@@ -175,7 +244,15 @@ SCHEDULE = [
     ("generate_c", "30 12 * * *",     lambda: generate(GROUP_C)),
     ("generate_d", "40 12 * * *",     lambda: generate(GROUP_D)),
     ("generate_e", "50 12 * * *",     lambda: generate(GROUP_E)),
-    ("drain",      "5-55/10 * * * *", drain),                       # one post / 10 min, 24/7
+    ("drain",      "5-55/10 * * * *", drain),                       # one post / 10 min, 24/7 (guaranteed)
+    ("drain_catchup", "0-50/10 * * * *", drain_catchup),            # recovers a missed slot within 5 min
+    ("filler_refill", "40 11,17,23,5 * * *", filler_refill),        # news/chart backlog, 4x a day
+    ("edu_dsa",    "2 9 * * *",        lambda: edu_generate("dsa")),     # today's Q&A pools, 5-6 AM ET
+    ("edu_sd",     "12 9 * * *",       lambda: edu_generate("sd")),
+    ("edu_mlsd",   "22 9 * * *",       lambda: edu_generate("mlsd")),
+    ("edu_ai",     "32 9 * * *",       lambda: edu_generate("ai")),
+    ("edu_papers", "42 9 * * *",       lambda: edu_generate("papers")),
+    ("edu_topup",  "2 21 * * *",       edu_generate_all),                # evening top-up if anything ran short
     ("growth_ask", "0 13 * * *",      growth_ask),                  # 9 AM ET check-in email
     ("growth_poll","*/20 * * * *",    growth_poll),                 # read replies / chat
     ("health_report", "30 13 * * *",  health_report),               # 9:30 AM ET watchdog email

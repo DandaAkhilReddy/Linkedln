@@ -170,9 +170,15 @@ def daily_report(store):
         strat = strategy.summary(store)
     except Exception:
         strat = ""
+    try:
+        import edu_content
+        mix = edu_content.posted_text(store).split("\n", 1)[0]     # the one-line breakdown
+    except Exception:
+        mix = ""
     body = (f"{head}\n\n"
             f"Posts in last 24h: {r['posts_24h']}\n"
-            f"Largest gap between posts: {r['max_gap_min']} min\n"
+            + (mix + "\n" if mix else "")
+            + f"Largest gap between posts: {r['max_gap_min']} min\n"
             f"Queue depth now: {r['queue']}\n"
             f"Last generate: {r['last_generate'] or 'never'}\n"
             f"Last post: {r['last_post'] or 'never'}\n"
